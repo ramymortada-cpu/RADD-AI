@@ -1,0 +1,130 @@
+###############################################################################
+# Radd AI — Full Deployment Stack
+# Usage: docker compose -f docker-compose.deploy.yml --env-file .env up -d
+###############################################################################
+
+services:
+  # ─── Infrastructure ─────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: radd_postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-radd}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-radd_dev_password}
+      POSTGRES_DB: ${POSTGRES_DB:-radd}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-radd}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: radd_redis
+    command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  qdrant:
+    image: qdrant/qdrant:v1.12.0
+    container_name: radd_qdrant
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:6333/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ─── Application ────────────────────────────────────────────────────────────
+  api:
+    image: ghcr.io/ramymortada-cpu/radd-api:latest
+    container_name: radd_api
+    ports:
+      - "8000:8000"
+    environment:
+      - APP_ENV=${APP_ENV:-production}
+      - DEBUG=${DEBUG:-false}
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-radd}:${POSTGRES_PASSWORD:-radd_dev_password}@postgres:5432/${POSTGRES_DB:-radd}
+      - REDIS_URL=redis://redis:6379/0
+      - QDRANT_URL=http://qdrant:6333
+      - SECRET_KEY=${SECRET_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - SENTRY_DSN=${SENTRY_DSN:-}
+      - SENTRY_ENVIRONMENT=${SENTRY_ENVIRONMENT:-production}
+      - DEFAULT_RATE_LIMIT=${DEFAULT_RATE_LIMIT:-200/minute}
+      - AUTH_RATE_LIMIT=${AUTH_RATE_LIMIT:-20/minute}
+      - META_APP_SECRET=${META_APP_SECRET:-}
+      - META_VERIFY_TOKEN=${META_VERIFY_TOKEN}
+      - WA_PHONE_NUMBER_ID=${WA_PHONE_NUMBER_ID:-}
+      - WA_API_TOKEN=${WA_API_TOKEN:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+
+  worker:
+    image: ghcr.io/ramymortada-cpu/radd-worker:latest
+    container_name: radd_worker
+    environment:
+      - APP_ENV=${APP_ENV:-production}
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-radd}:${POSTGRES_PASSWORD:-radd_dev_password}@postgres:5432/${POSTGRES_DB:-radd}
+      - REDIS_URL=redis://redis:6379/0
+      - QDRANT_URL=http://qdrant:6333
+      - SECRET_KEY=${SECRET_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - SENTRY_DSN=${SENTRY_DSN:-}
+    volumes:
+      - models_cache:/models
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+    restart: unless-stopped
+
+  web:
+    image: ghcr.io/ramymortada-cpu/radd-web:latest
+    container_name: radd_web
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+  qdrant_data:
+  models_cache:

@@ -37,7 +37,11 @@ dependencies = [
     "tiktoken>=0.8.0",
     "slowapi>=0.1.9",
     "sentry-sdk[fastapi]>=2.5.1",
+    "tokenizers>=0.20.0",
 ]
+
+[tool.uv]
+override-dependencies = ["tokenizers>=0.20.0"]
 
 [project.optional-dependencies]
 dev = [

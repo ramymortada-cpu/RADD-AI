@@ -17,9 +17,10 @@ async def get_db_session(workspace_id: uuid.UUID | None = None) -> AsyncGenerato
     """
     async with AsyncSessionLocal() as session:
         if workspace_id is not None:
+            # asyncpg does not support bind parameters for SET LOCAL
+            # UUID is safe to interpolate (validated by uuid.UUID type)
             await session.execute(
-                text("SET LOCAL app.current_workspace_id = :wid"),
-                {"wid": str(workspace_id)},
+                text(f"SET LOCAL app.current_workspace_id = '{workspace_id}'")
             )
         try:
             yield session
