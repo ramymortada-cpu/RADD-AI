@@ -35,11 +35,15 @@ class Settings(BaseSettings):
     jwt_secret_key: str = "change-me-jwt"
     jwt_algorithm: str = "HS256"
     jwt_access_token_expire_minutes: int = 15
-    jwt_refresh_token_expire_days: int = 7
+    jwt_refresh_token_expire_days: int     # --- Sentry ---
+    sentry_dsn: str | None = None
 
-    # WhatsApp Cloud API
-    meta_app_secret: str = ""
-    meta_verify_token: str = "radd_webhook_verify"
+    # --- Rate Limiting ---
+    default_rate_limit: str = "100/minute"
+    auth_rate_limit: str = "10/minute"
+
+    # --- WhatsApp Cloud API ---
+    meta_app_secret: str = ""  meta_verify_token: str = "radd_webhook_verify"
     wa_phone_number_id: str = ""
     wa_business_account_id: str = ""
     wa_api_token: str = ""

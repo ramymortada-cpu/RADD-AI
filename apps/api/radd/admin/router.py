@@ -3,7 +3,9 @@ from __future__ import annotations
 import uuid
 from typing import Annotated, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status, Request
+from radd.limiter import limiter
+from radd.config import settings
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,7 +22,8 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 # ─── KPI dashboard ────────────────────────────────────────────────────────────
 
 @router.get("/analytics")
-async def get_analytics(current: Annotated[CurrentUser, Depends(require_reviewer)]):
+@limiter.limit(settings.default_rate_limit)
+async def get_analytics(request: Request, current: Annotated[CurrentUser, Depends(require_reviewer)]):
     """8 KPI cards for the dashboard."""
     async with get_db_session(current.workspace_id) as db:
         kpis = await get_kpis(db, current.workspace_id)
@@ -39,7 +42,8 @@ class SettingsUpdate(BaseModel):
 
 
 @router.get("/settings")
-async def get_settings(current: Annotated[CurrentUser, Depends(require_reviewer)]):
+@limiter.limit(settings.default_rate_limit)
+async def get_settings(request: Request, current: Annotated[CurrentUser, Depends(require_reviewer)]):
     async with get_db_session() as db:
         result = await db.execute(
             select(Workspace).where(Workspace.id == current.workspace_id)
@@ -57,7 +61,9 @@ async def get_settings(current: Annotated[CurrentUser, Depends(require_reviewer)
 
 
 @router.patch("/settings")
+@limiter.limit(settings.default_rate_limit)
 async def update_settings(
+    request: Request,
     body: SettingsUpdate,
     current: Annotated[CurrentUser, Depends(require_admin)],
 ):
@@ -80,7 +86,9 @@ async def update_settings(
 # ─── Audit log ────────────────────────────────────────────────────────────────
 
 @router.get("/audit-log")
+@limiter.limit(settings.default_rate_limit)
 async def get_audit_log(
+    request: Request,
     current: Annotated[CurrentUser, Depends(require_admin)],
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
@@ -138,7 +146,8 @@ class UserResponse(BaseModel):
 
 
 @router.get("/users", response_model=list[UserResponse])
-async def list_users(current: Annotated[CurrentUser, Depends(require_admin)]):
+@limiter.limit(settings.default_rate_limit)
+async def list_users(request: Request, current: Annotated[CurrentUser, Depends(require_admin)]):
     async with get_db_session(current.workspace_id) as db:
         result = await db.execute(
             select(User).where(User.workspace_id == current.workspace_id)
@@ -149,7 +158,9 @@ async def list_users(current: Annotated[CurrentUser, Depends(require_admin)]):
 
 
 @router.post("/users", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+@limiter.limit(settings.default_rate_limit)
 async def create_user(
+    request: Request,
     body: UserCreate,
     current: Annotated[CurrentUser, Depends(require_admin)],
 ):
@@ -182,7 +193,9 @@ async def create_user(
 
 
 @router.patch("/users/{user_id}")
+@limiter.limit(settings.default_rate_limit)
 async def update_user(
+    request: Request,
     user_id: uuid.UUID,
     body: dict,
     current: Annotated[CurrentUser, Depends(require_admin)],

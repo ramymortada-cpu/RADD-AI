@@ -2,7 +2,9 @@ from __future__ import annotations
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status, Request
+from radd.limiter import limiter
+from radd.config import settings
 from sqlalchemy import func, select
 
 from radd.auth.middleware import CurrentUser, require_agent
@@ -19,7 +21,9 @@ router = APIRouter(prefix="/escalations", tags=["escalations"])
 
 
 @router.get("", response_model=EscalationQueue)
+@limiter.limit(settings.default_rate_limit)
 async def list_escalations(
+    request: Request,
     current: Annotated[CurrentUser, Depends(require_agent)],
     status_filter: str = Query("pending", alias="status"),
     page: int = Query(1, ge=1),
@@ -50,7 +54,9 @@ async def list_escalations(
 
 
 @router.get("/{escalation_id}", response_model=EscalationResponse)
+@limiter.limit(settings.default_rate_limit)
 async def get_escalation(
+    request: Request,
     escalation_id: uuid.UUID,
     current: Annotated[CurrentUser, Depends(require_agent)],
 ):
@@ -68,7 +74,9 @@ async def get_escalation(
 
 
 @router.post("/{escalation_id}/accept", response_model=EscalationResponse)
+@limiter.limit(settings.default_rate_limit)
 async def accept_escalation(
+    request: Request,
     escalation_id: uuid.UUID,
     current: Annotated[CurrentUser, Depends(require_agent)],
 ):
@@ -103,7 +111,9 @@ async def accept_escalation(
 
 
 @router.post("/{escalation_id}/resolve", response_model=EscalationResponse)
+@limiter.limit(settings.default_rate_limit)
 async def resolve_escalation(
+    request: Request,
     escalation_id: uuid.UUID,
     body: EscalationResolve,
     current: Annotated[CurrentUser, Depends(require_agent)],

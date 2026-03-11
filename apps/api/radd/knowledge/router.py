@@ -2,7 +2,9 @@ from __future__ import annotations
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status, Request
+from radd.limiter import limiter
+from radd.config import settings
 
 from radd.auth.middleware import CurrentUser, require_admin, require_agent, require_reviewer
 from radd.db.session import get_db_session
@@ -25,7 +27,9 @@ router = APIRouter(prefix="/kb", tags=["knowledge"])
 # ─── Documents ────────────────────────────────────────────────────────────────
 
 @router.get("/documents", response_model=KBDocumentList)
+@limiter.limit(settings.default_rate_limit)
 async def list_documents(
+    request: Request,
     current: Annotated[CurrentUser, Depends(require_reviewer)],
     status_filter: str | None = Query(None, alias="status"),
     page: int = Query(1, ge=1),
@@ -44,7 +48,9 @@ async def list_documents(
 
 
 @router.get("/documents/{doc_id}", response_model=KBDocumentDetail)
+@limiter.limit(settings.default_rate_limit)
 async def get_document(
+    request: Request,
     doc_id: uuid.UUID,
     current: Annotated[CurrentUser, Depends(require_reviewer)],
 ):
@@ -60,7 +66,9 @@ async def get_document(
 
 
 @router.post("/documents", response_model=KBDocumentResponse, status_code=status.HTTP_201_CREATED)
+@limiter.limit(settings.default_rate_limit)
 async def create_document(
+    request: Request,
     body: KBDocumentCreate,
     background_tasks: BackgroundTasks,
     current: Annotated[CurrentUser, Depends(require_agent)],
@@ -73,7 +81,9 @@ async def create_document(
 
 
 @router.patch("/documents/{doc_id}", response_model=KBDocumentResponse)
+@limiter.limit(settings.default_rate_limit)
 async def update_document(
+    request: Request,
     doc_id: uuid.UUID,
     body: KBDocumentUpdate,
     current: Annotated[CurrentUser, Depends(require_agent)],
@@ -87,7 +97,9 @@ async def update_document(
 
 
 @router.delete("/documents/{doc_id}", status_code=status.HTTP_204_NO_CONTENT)
+@limiter.limit(settings.default_rate_limit)
 async def delete_document(
+    request: Request,
     doc_id: uuid.UUID,
     current: Annotated[CurrentUser, Depends(require_admin)],
 ):
@@ -99,7 +111,9 @@ async def delete_document(
 
 
 @router.post("/documents/{doc_id}/approve", response_model=KBDocumentResponse)
+@limiter.limit(settings.default_rate_limit)
 async def approve_document(
+    request: Request,
     doc_id: uuid.UUID,
     background_tasks: BackgroundTasks,
     current: Annotated[CurrentUser, Depends(require_admin)],
@@ -129,7 +143,9 @@ async def approve_document(
 # ─── Templates ────────────────────────────────────────────────────────────────
 
 @router.get("/templates", response_model=list[TemplateResponse])
+@limiter.limit(settings.default_rate_limit)
 async def list_templates(
+    request: Request,
     current: Annotated[CurrentUser, Depends(require_reviewer)],
     intent_id: str | None = None,
 ):
@@ -139,7 +155,9 @@ async def list_templates(
 
 
 @router.post("/templates", response_model=TemplateResponse, status_code=status.HTTP_201_CREATED)
+@limiter.limit(settings.default_rate_limit)
 async def create_template(
+    request: Request,
     body: TemplateCreate,
     current: Annotated[CurrentUser, Depends(require_admin)],
 ):
@@ -149,7 +167,9 @@ async def create_template(
 
 
 @router.patch("/templates/{template_id}", response_model=TemplateResponse)
+@limiter.limit(settings.default_rate_limit)
 async def update_template(
+    request: Request,
     template_id: uuid.UUID,
     body: TemplateUpdate,
     current: Annotated[CurrentUser, Depends(require_admin)],

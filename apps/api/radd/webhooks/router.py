@@ -11,6 +11,8 @@ import uuid
 import redis.asyncio as aioredis
 import structlog
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, Response, status
+from radd.limiter import limiter
+from radd.config import settings
 from sqlalchemy import select
 
 from radd.config import settings
@@ -28,6 +30,7 @@ DEDUP_TTL_SECONDS = 300  # 5 minutes
 # ── Verification ──────────────────────────────────────────────────────────────
 
 @router.get("/whatsapp")
+@limiter.limit(settings.auth_rate_limit)
 async def verify_webhook(request: Request):
     """Meta webhook verification challenge."""
     params = dict(request.query_params)
@@ -45,6 +48,7 @@ async def verify_webhook(request: Request):
 # ── Inbound message handler ───────────────────────────────────────────────────
 
 @router.post("/whatsapp", status_code=status.HTTP_200_OK)
+@limiter.limit(settings.default_rate_limit)
 async def receive_message(request: Request, background_tasks: BackgroundTasks):
     """
     Receive inbound WhatsApp message.

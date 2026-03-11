@@ -1,7 +1,9 @@
 from __future__ import annotations
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
+from radd.limiter import limiter
+from radd.config import settings
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,7 +22,8 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(body: LoginRequest):
+@limiter.limit(settings.auth_rate_limit)
+async def login(request: Request, body: LoginRequest):
     async with get_db_session() as db:
         result = await db.execute(
             select(Workspace).where(Workspace.slug == body.workspace_slug, Workspace.status == "active")
@@ -43,7 +46,8 @@ async def login(body: LoginRequest):
 
 
 @router.post("/refresh", response_model=TokenResponse)
-async def refresh(body: RefreshRequest):
+@limiter.limit(settings.auth_rate_limit)
+async def refresh(request: Request, body: RefreshRequest):
     try:
         payload = decode_token(body.refresh_token)
     except ValueError:

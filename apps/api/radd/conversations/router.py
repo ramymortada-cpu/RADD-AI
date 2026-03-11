@@ -7,7 +7,9 @@ from datetime import datetime, timezone
 from typing import Annotated
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status, Request
+from radd.limiter import limiter
+from radd.config import settings
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import selectinload
 
@@ -29,7 +31,9 @@ router = APIRouter(prefix="/conversations", tags=["conversations"])
 
 
 @router.get("", response_model=ConversationList)
+@limiter.limit(settings.default_rate_limit)
 async def list_conversations(
+    request: Request,
     current: Annotated[CurrentUser, Depends(require_reviewer)],
     status_filter: str | None = Query(None, alias="status"),
     page: int = Query(1, ge=1),
@@ -69,7 +73,9 @@ async def list_conversations(
 
 
 @router.get("/{conversation_id}", response_model=ConversationDetail)
+@limiter.limit(settings.default_rate_limit)
 async def get_conversation(
+    request: Request,
     conversation_id: uuid.UUID,
     current: Annotated[CurrentUser, Depends(require_reviewer)],
 ):
@@ -102,7 +108,9 @@ async def get_conversation(
 
 
 @router.patch("/{conversation_id}", response_model=ConversationSummary)
+@limiter.limit(settings.default_rate_limit)
 async def update_conversation(
+    request: Request,
     conversation_id: uuid.UUID,
     body: dict,
     current: Annotated[CurrentUser, Depends(require_agent)],
@@ -131,7 +139,9 @@ async def update_conversation(
 
 
 @router.post("/{conversation_id}/messages", response_model=MessageResponse, status_code=status.HTTP_201_CREATED)
+@limiter.limit(settings.default_rate_limit)
 async def agent_reply(
+    request: Request,
     conversation_id: uuid.UUID,
     body: AgentReply,
     current: Annotated[CurrentUser, Depends(require_agent)],

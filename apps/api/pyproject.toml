@@ -35,6 +35,8 @@ dependencies = [
     "structlog>=24.4.0",
     "tenacity>=9.0.0",
     "tiktoken>=0.8.0",
+    "slowapi>=0.1.9",
+    "sentry-sdk[fastapi]>=2.5.1",
 ]
 
 [project.optional-dependencies]
