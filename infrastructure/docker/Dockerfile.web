@@ -1,0 +1,51 @@
+# ─── Stage 1: deps ───────────────────────────────────────────────────────────
+FROM node:22-alpine AS deps
+
+RUN corepack enable && corepack prepare pnpm@latest --activate
+
+WORKDIR /app
+
+COPY apps/web/package.json apps/web/pnpm-lock.yaml* ./
+
+RUN pnpm install --frozen-lockfile
+
+# ─── Stage 2: builder ────────────────────────────────────────────────────────
+FROM node:22-alpine AS builder
+
+RUN corepack enable && corepack prepare pnpm@latest --activate
+
+WORKDIR /app
+
+COPY --from=deps /app/node_modules ./node_modules
+COPY apps/web/ .
+
+# Next.js standalone output (smallest possible image)
+ENV NEXT_TELEMETRY_DISABLED=1
+
+# Build-time env — API URL is rewritten at runtime via env var
+ARG NEXT_PUBLIC_API_URL=http://localhost:8000
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+
+RUN pnpm build
+
+# ─── Stage 3: runtime ────────────────────────────────────────────────────────
+FROM node:22-alpine AS runtime
+
+RUN addgroup --system --gid 1001 radd && \
+    adduser --system --uid 1001 radd
+
+WORKDIR /app
+
+ENV NODE_ENV=production \
+    NEXT_TELEMETRY_DISABLED=1 \
+    PORT=3000
+
+COPY --from=builder --chown=radd:radd /app/.next/standalone ./
+COPY --from=builder --chown=radd:radd /app/.next/static ./.next/static
+COPY --from=builder --chown=radd:radd /app/public ./public 2>/dev/null || true
+
+USER radd
+
+EXPOSE 3000
+
+CMD ["node", "server.js"]

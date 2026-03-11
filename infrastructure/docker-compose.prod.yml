@@ -1,0 +1,130 @@
+###############################################################################
+# Radd — Production Docker Compose
+#
+# Usage:
+#   docker compose -f infrastructure/docker-compose.prod.yml up -d
+#
+# Requires a populated .env file at project root.
+# External managed services (Neon DB, Upstash Redis, Qdrant Cloud) are
+# referenced via environment variables — no local Postgres/Redis containers.
+###############################################################################
+
+version: "3.9"
+
+x-api-env: &api-env
+  env_file: ../.env
+  environment:
+    - PYTHONUNBUFFERED=1
+    - TOKENIZERS_PARALLELISM=false
+
+networks:
+  radd_net:
+    driver: bridge
+
+volumes:
+  model_cache:   # HuggingFace NLI model (xlm-roberta) — persisted across restarts
+  minio_data:
+
+services:
+
+  # ─── API ──────────────────────────────────────────────────────────────────
+  api:
+    image: ${REGISTRY:-ghcr.io/radd-ai}/radd-api:${TAG:-latest}
+    build:
+      context: ..
+      dockerfile: infrastructure/docker/Dockerfile.api
+    <<: *api-env
+    ports:
+      - "8000:8000"
+    networks: [radd_net]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    depends_on:
+      qdrant:
+        condition: service_healthy
+
+  # ─── Message Worker ───────────────────────────────────────────────────────
+  worker:
+    image: ${REGISTRY:-ghcr.io/radd-ai}/radd-worker:${TAG:-latest}
+    build:
+      context: ..
+      dockerfile: infrastructure/docker/Dockerfile.worker
+    command: ["python", "-m", "workers.message_worker"]
+    <<: *api-env
+    volumes:
+      - model_cache:/models
+    networks: [radd_net]
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+
+  # ─── KB Indexer Worker ────────────────────────────────────────────────────
+  kb_indexer:
+    image: ${REGISTRY:-ghcr.io/radd-ai}/radd-worker:${TAG:-latest}
+    build:
+      context: ..
+      dockerfile: infrastructure/docker/Dockerfile.worker
+    command: ["python", "-m", "workers.kb_indexer"]
+    <<: *api-env
+    volumes:
+      - model_cache:/models
+    networks: [radd_net]
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+
+  # ─── Frontend ─────────────────────────────────────────────────────────────
+  web:
+    image: ${REGISTRY:-ghcr.io/radd-ai}/radd-web:${TAG:-latest}
+    build:
+      context: ..
+      dockerfile: infrastructure/docker/Dockerfile.web
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-https://api.yourdomain.com}
+    env_file: ../.env
+    ports:
+      - "3000:3000"
+    networks: [radd_net]
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+
+  # ─── Qdrant (self-hosted vector DB) ──────────────────────────────────────
+  # For cloud-hosted Qdrant, remove this service and set QDRANT_URL in .env
+  qdrant:
+    image: qdrant/qdrant:v1.12.1
+    volumes:
+      - ../infrastructure/qdrant_data:/qdrant/storage
+    ports:
+      - "6333:6333"
+    networks: [radd_net]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ─── Nginx reverse proxy ──────────────────────────────────────────────────
+  nginx:
+    image: nginx:1.27-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/certs:/etc/nginx/certs:ro
+    networks: [radd_net]
+    restart: unless-stopped
+    depends_on:
+      - api
+      - web

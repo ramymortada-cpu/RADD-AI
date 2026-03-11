@@ -1,0 +1,52 @@
+# ─── Secrets ──────────────────────────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# ─── Python ───────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+htmlcov/
+.coverage
+coverage.xml
+
+# ─── Node ─────────────────────────────────────────────────────────────────────
+node_modules/
+.next/
+.turbo/
+dist/
+*.tsbuildinfo
+
+# ─── Docker ───────────────────────────────────────────────────────────────────
+infrastructure/qdrant_data/
+infrastructure/nginx/certs/
+
+# ─── OS ───────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ─── IDE ──────────────────────────────────────────────────────────────────────
+.cursor/
+.vscode/
+.idea/
+
+# ─── Logs ─────────────────────────────────────────────────────────────────────
+*.log
+logs/
+
+# ─── uv lockfile (generate locally) ──────────────────────────────────────────
+# uv.lock  ← نبقيه tracked لضمان reproducible builds
+
+# ─── MinIO data (local dev volume) ────────────────────────────────────────────
+minio_data/

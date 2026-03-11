@@ -1,0 +1,53 @@
+# ─── Stage 1: builder ────────────────────────────────────────────────────────
+FROM python:3.12-slim AS builder
+
+# Install uv
+COPY --from=ghcr.io/astral-sh/uv:0.5.24 /uv /usr/local/bin/uv
+
+WORKDIR /app
+
+# Copy dependency files first (layer cache)
+COPY apps/api/pyproject.toml apps/api/uv.lock* ./
+
+# Install dependencies into a virtual environment (no dev deps)
+RUN uv sync --frozen --no-dev --no-install-project
+
+# Copy source
+COPY apps/api/ .
+
+# Install the project itself
+RUN uv sync --frozen --no-dev
+
+# ─── Stage 2: runtime ────────────────────────────────────────────────────────
+FROM python:3.12-slim AS runtime
+
+# Security: non-root user
+RUN groupadd --gid 1001 radd && \
+    useradd --uid 1001 --gid radd --shell /bin/bash --create-home radd
+
+WORKDIR /app
+
+# Copy the pre-built virtualenv + source from builder
+COPY --from=builder --chown=radd:radd /app /app
+
+# The venv's bin is inside .venv
+ENV PATH="/app/.venv/bin:$PATH" \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    # Disable tokenizers parallelism warning (transformers)
+    TOKENIZERS_PARALLELISM=false
+
+USER radd
+
+EXPOSE 8000
+
+# Gunicorn + uvicorn workers for production
+# 2 workers × (2 × CPU + 1) is the standard formula; we cap at 4 for containers
+CMD ["gunicorn", "radd.main:app", \
+     "--worker-class", "uvicorn.workers.UvicornWorker", \
+     "--workers", "2", \
+     "--bind", "0.0.0.0:8000", \
+     "--timeout", "120", \
+     "--keep-alive", "5", \
+     "--access-logfile", "-", \
+     "--error-logfile", "-"]

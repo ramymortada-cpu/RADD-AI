@@ -1,0 +1,227 @@
+from __future__ import annotations
+"""
+Conversations API — list, detail, agent reply, status updates.
+"""
+import uuid
+from datetime import datetime, timezone
+from typing import Annotated
+
+import structlog
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import func, select, update
+from sqlalchemy.orm import selectinload
+
+from radd.auth.middleware import CurrentUser, require_agent, require_reviewer
+from radd.conversations.schemas import (
+    AgentReply,
+    ConversationDetail,
+    ConversationList,
+    ConversationSummary,
+    CustomerSummary,
+    MessageResponse,
+)
+from radd.db.models import Channel, Conversation, Customer, Message, AuditLog
+from radd.db.session import get_db_session
+from radd.websocket.manager import ws_manager
+
+logger = structlog.get_logger()
+router = APIRouter(prefix="/conversations", tags=["conversations"])
+
+
+@router.get("", response_model=ConversationList)
+async def list_conversations(
+    current: Annotated[CurrentUser, Depends(require_reviewer)],
+    status_filter: str | None = Query(None, alias="status"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+):
+    async with get_db_session(current.workspace_id) as db:
+        q = select(Conversation).where(Conversation.workspace_id == current.workspace_id)
+        if status_filter:
+            q = q.where(Conversation.status == status_filter)
+
+        total_result = await db.execute(select(func.count()).select_from(q.subquery()))
+        total = total_result.scalar_one()
+
+        q = q.order_by(Conversation.last_message_at.desc()).offset((page - 1) * page_size).limit(page_size)
+        result = await db.execute(q)
+        conversations = result.scalars().all()
+
+        # Fetch customers in batch
+        customer_ids = list({c.customer_id for c in conversations})
+        customer_map: dict[uuid.UUID, Customer] = {}
+        if customer_ids:
+            cust_result = await db.execute(
+                select(Customer).where(Customer.id.in_(customer_ids))
+            )
+            for cust in cust_result.scalars().all():
+                customer_map[cust.id] = cust
+
+    items = []
+    for conv in conversations:
+        summary = ConversationSummary.model_validate(conv)
+        cust = customer_map.get(conv.customer_id)
+        if cust:
+            summary.customer = CustomerSummary.model_validate(cust)
+        items.append(summary)
+
+    return ConversationList(items=items, total=total, page=page, page_size=page_size)
+
+
+@router.get("/{conversation_id}", response_model=ConversationDetail)
+async def get_conversation(
+    conversation_id: uuid.UUID,
+    current: Annotated[CurrentUser, Depends(require_reviewer)],
+):
+    async with get_db_session(current.workspace_id) as db:
+        conv_result = await db.execute(
+            select(Conversation).where(
+                Conversation.id == conversation_id,
+                Conversation.workspace_id == current.workspace_id,
+            )
+        )
+        conv = conv_result.scalar_one_or_none()
+        if not conv:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+
+        msg_result = await db.execute(
+            select(Message)
+            .where(Message.conversation_id == conversation_id)
+            .order_by(Message.created_at.asc())
+        )
+        messages = msg_result.scalars().all()
+
+        cust_result = await db.execute(select(Customer).where(Customer.id == conv.customer_id))
+        customer = cust_result.scalar_one_or_none()
+
+    detail = ConversationDetail.model_validate(conv)
+    detail.messages = [MessageResponse.model_validate(m) for m in messages]
+    if customer:
+        detail.customer = CustomerSummary.model_validate(customer)
+    return detail
+
+
+@router.patch("/{conversation_id}", response_model=ConversationSummary)
+async def update_conversation(
+    conversation_id: uuid.UUID,
+    body: dict,
+    current: Annotated[CurrentUser, Depends(require_agent)],
+):
+    """Update conversation status or assignment."""
+    allowed_fields = {"status", "assigned_user_id"}
+    updates = {k: v for k, v in body.items() if k in allowed_fields}
+
+    async with get_db_session(current.workspace_id) as db:
+        result = await db.execute(
+            select(Conversation).where(
+                Conversation.id == conversation_id,
+                Conversation.workspace_id == current.workspace_id,
+            )
+        )
+        conv = result.scalar_one_or_none()
+        if not conv:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+
+        for key, value in updates.items():
+            setattr(conv, key, value)
+        if updates.get("status") == "resolved":
+            conv.resolved_at = datetime.now(timezone.utc)
+
+    return ConversationSummary.model_validate(conv)
+
+
+@router.post("/{conversation_id}/messages", response_model=MessageResponse, status_code=status.HTTP_201_CREATED)
+async def agent_reply(
+    conversation_id: uuid.UUID,
+    body: AgentReply,
+    current: Annotated[CurrentUser, Depends(require_agent)],
+):
+    """
+    Agent sends a message in a conversation.
+    Delivers via WhatsApp and logs it.
+    """
+    async with get_db_session(current.workspace_id) as db:
+        conv_result = await db.execute(
+            select(Conversation).where(
+                Conversation.id == conversation_id,
+                Conversation.workspace_id == current.workspace_id,
+            )
+        )
+        conv = conv_result.scalar_one_or_none()
+        if not conv:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+
+        # Fetch channel config for WA delivery
+        chan_result = await db.execute(select(Channel).where(Channel.id == conv.channel_id))
+        channel = chan_result.scalar_one_or_none()
+
+        cust_result = await db.execute(select(Customer).where(Customer.id == conv.customer_id))
+        customer = cust_result.scalar_one_or_none()
+
+        # Store agent message
+        msg = Message(
+            workspace_id=current.workspace_id,
+            conversation_id=conversation_id,
+            sender_type="agent",
+            content=body.content,
+        )
+        db.add(msg)
+
+        # Update conversation
+        conv.last_message_at = datetime.now(timezone.utc)
+        conv.message_count = (conv.message_count or 0) + 1
+        if body.resolve:
+            conv.status = "resolved"
+            conv.resolved_at = datetime.now(timezone.utc)
+        elif conv.status == "waiting_agent":
+            conv.status = "active"
+
+        db.add(AuditLog(
+            workspace_id=current.workspace_id,
+            user_id=current.user.id,
+            action="message.agent_sent",
+            entity_type="conversation",
+            entity_id=conversation_id,
+        ))
+
+        await db.flush()
+        msg_id = msg.id
+
+    # Deliver via WhatsApp (outside transaction)
+    if channel and customer:
+        try:
+            from radd.config import settings
+            from radd.whatsapp.client import send_text_message
+            channel_config = channel.config or {}
+
+            # Decode phone: stored as hash — need raw phone for delivery.
+            # In production: store encrypted phone. For pilot: pass phone via channel metadata.
+            phone = channel_config.get("pilot_phone_override", "")
+            if phone:
+                await send_text_message(
+                    phone_number=phone,
+                    message=body.content,
+                    phone_number_id=channel_config.get("wa_phone_number_id") or settings.wa_phone_number_id,
+                    api_token=settings.wa_api_token,
+                )
+        except Exception as e:
+            logger.error("agent_reply.wa_delivery_failed", error=str(e))
+
+    # Broadcast to other agents watching this conversation
+    await ws_manager.broadcast_to_workspace(
+        str(current.workspace_id),
+        {
+            "type": "conversation.message",
+            "conversation_id": str(conversation_id),
+            "sender_type": "agent",
+            "agent_id": str(current.user.id),
+            "content_preview": body.content[:100],
+        },
+        exclude_user=str(current.user.id),
+    )
+
+    async with get_db_session(current.workspace_id) as db:
+        result = await db.execute(select(Message).where(Message.id == msg_id))
+        msg = result.scalar_one()
+
+    return MessageResponse.model_validate(msg)
