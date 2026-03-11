@@ -27,7 +27,7 @@ dependencies = [
     # OpenAI
     "openai>=1.57.0",
     # NLP
-    "transformers>=4.47.0",
+    "transformers>=4.0.0,<4.44.0",
     "torch>=2.5.0",
     "camel-tools>=1.5.4",
     # Utilities
