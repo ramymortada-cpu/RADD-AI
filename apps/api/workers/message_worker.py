@@ -95,8 +95,15 @@ async def process_message(msg_data: dict) -> None:
     sender_phone = msg_data["sender_phone"]
     text_body = msg_data["text"]
     external_id = msg_data["message_id"]
+    message_type = msg_data.get("message_type", "text")
+    media_id = msg_data.get("media_id", "")
 
-    logger.info("worker.processing", workspace_id=str(workspace_id), external_id=external_id)
+    logger.info("worker.processing", workspace_id=str(workspace_id), external_id=external_id, type=message_type)
+
+    # ── Image message: Vision pipeline ────────────────────────────────────────
+    if message_type == "image" and media_id:
+        await _process_image_message(workspace_id, sender_phone, external_id, media_id, text_body)
+        return
 
     async with get_db_session(workspace_id) as db:
         # Resolve channel
@@ -417,6 +424,75 @@ async def process_message(msg_data: dict) -> None:
             )
         except Exception as e:
             logger.error("worker.send_failed", error=str(e), phone=sender_phone)
+
+
+async def _process_image_message(
+    workspace_id: uuid.UUID,
+    sender_phone: str,
+    external_id: str,
+    media_id: str,
+    caption: str,
+) -> None:
+    """Process an image message using Vision pipeline."""
+    async with get_db_session(workspace_id) as db:
+        result = await db.execute(
+            select(Channel).where(Channel.workspace_id == workspace_id, Channel.type == "whatsapp")
+        )
+        channel = result.scalar_one_or_none()
+        if not channel:
+            return
+
+        customer = await get_or_create_customer(db, workspace_id, sender_phone)
+        conversation = await get_or_create_conversation(db, workspace_id, customer, channel.id)
+
+        channel_config = channel.config or {}
+        wa_token = channel_config.get("wa_api_token") or settings.wa_api_token
+        dialect_result = detect_dialect(caption or "")
+        dialect_str = dialect_result.dialect if hasattr(dialect_result, "dialect") else "gulf"
+
+        from radd.vision.image_analyzer import process_whatsapp_image
+        vision_result = await process_whatsapp_image(
+            media_id=media_id,
+            wa_token=wa_token,
+            dialect=dialect_str,
+            store_name="متجرنا",
+            customer_text=caption,
+        )
+
+        response_text = vision_result.get("response_text", "تعذّر تحليل الصورة. سأحولك لفريق الدعم.")
+
+        # Store messages
+        inbound = Message(
+            workspace_id=workspace_id,
+            conversation_id=conversation.id,
+            sender_type="customer",
+            content=caption or "[صورة]",
+            external_id=external_id,
+            metadata_={"message_type": "image", "media_id": media_id, "image_type": vision_result.get("image_type", "")},
+        )
+        db.add(inbound)
+
+        outbound = Message(
+            workspace_id=workspace_id,
+            conversation_id=conversation.id,
+            sender_type="system",
+            content=response_text,
+        )
+        db.add(outbound)
+        conversation.last_message_at = datetime.now(timezone.utc)
+        conversation.message_count = (conversation.message_count or 0) + 2
+        await db.flush()
+
+    if not settings.shadow_mode:
+        try:
+            await send_text_message(
+                phone_number=sender_phone,
+                message=response_text,
+                phone_number_id=channel_config.get("wa_phone_number_id") or settings.wa_phone_number_id,
+                api_token=wa_token,
+            )
+        except Exception as e:
+            logger.error("worker.image_send_failed", error=str(e))
 
 
 async def run_worker():

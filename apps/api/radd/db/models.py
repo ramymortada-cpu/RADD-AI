@@ -178,6 +178,7 @@ class Message(Base):
         UUID(as_uuid=True), ForeignKey("conversations.id"), nullable=False
     )
     sender_type: Mapped[str] = mapped_column(String(20), nullable=False)  # customer, system, agent
+    message_type: Mapped[str] = mapped_column(String(20), server_default="text")  # text, image, audio
     content: Mapped[str] = mapped_column(Text, nullable=False)
     content_normalized: Mapped[str | None] = mapped_column(Text, nullable=True)
     external_id: Mapped[str | None] = mapped_column(String(255), nullable=True)

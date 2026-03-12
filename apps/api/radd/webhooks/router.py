@@ -104,10 +104,31 @@ async def _process_webhook_payload(payload: dict) -> None:
                     logger.info("whatsapp.duplicate_skipped", message_id=msg_id)
                     continue
 
-                # Non-text: reply with info message (fire and forget)
+                # Handle image messages — enqueue for Vision processing
+                if msg_type == "image":
+                    image_data = msg.get("image", {})
+                    media_id = image_data.get("id", "")
+                    caption = image_data.get("caption", "")
+                    if media_id:
+                        workspace_id = await _resolve_workspace(phone_number_id)
+                        if workspace_id:
+                            stream_key = f"messages:{workspace_id}"
+                            await r.xadd(stream_key, {
+                                "message_id": msg_id,
+                                "sender_phone": sender_phone,
+                                "text": caption or "[صورة]",
+                                "phone_number_id": phone_number_id,
+                                "workspace_id": str(workspace_id),
+                                "timestamp": msg.get("timestamp", ""),
+                                "message_type": "image",
+                                "media_id": media_id,
+                            })
+                            logger.info("whatsapp.image_enqueued", workspace_id=str(workspace_id))
+                    continue
+
+                # Non-text (non-image): skip with log
                 if msg_type != "text":
-                    logger.info("whatsapp.non_text_rejected", type=msg_type, sender=sender_phone)
-                    # TODO (Sprint 2): send UNSUPPORTED_MEDIA_MESSAGE back
+                    logger.info("whatsapp.non_text_skipped", type=msg_type)
                     continue
 
                 text_body = msg.get("text", {}).get("body", "")

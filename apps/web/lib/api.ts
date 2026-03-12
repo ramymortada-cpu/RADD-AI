@@ -34,7 +34,7 @@ function getToken(): string | null {
   return localStorage.getItem("radd_access_token");
 }
 
-async function apiFetch<T>(
+export async function apiFetch<T>(
   path: string,
   options: RequestInit = {}
 ): Promise<T> {
@@ -592,3 +592,55 @@ export interface KnowledgeGap {
 
 export const getKnowledgeGaps = (days = 7, limit = 20) =>
   apiFetch<KnowledgeGap[]>(`/intelligence/knowledge-gaps?days=${days}&limit=${limit}`);
+
+// ─── V3: RADD Score ───────────────────────────────────────────────────────────
+export const getRaddScore = (days = 30) =>
+  apiFetch<{ total: number; grade: string; summary_ar: string; breakdown: Record<string, number>; period_days: number }>(
+    `/admin/radd-score?period_days=${days}`
+  );
+
+// ─── V3: Churn Radar ──────────────────────────────────────────────────────────
+export const getChurnRadar = (inactiveDays = 45) =>
+  apiFetch<{
+    summary: { total: number; critical: number; high: number; medium: number; at_risk_revenue: number };
+    alerts: Array<{
+      customer_id: string; customer_tier: string; risk_level: string;
+      reason: string; days_inactive: number; total_revenue: number; suggested_action: string;
+    }>;
+  }>(`/admin/churn-radar?inactive_days=${inactiveDays}`);
+
+// ─── V3: Agent Performance ────────────────────────────────────────────────────
+export const getAgentPerformance = (days = 30) =>
+  apiFetch<{
+    summary: { agents: number; avg_csat: number; avg_resolution_minutes: number; total_resolved: number };
+    agents: Array<{
+      user_id: string; agent_name: string; total_assigned: number; total_resolved: number;
+      resolution_rate: number; avg_resolution_minutes: number; estimated_csat: number;
+    }>;
+  }>(`/admin/agent-performance?period_days=${days}`);
+
+// ─── V3: Follow-ups ───────────────────────────────────────────────────────────
+export const getFollowupStats = () =>
+  apiFetch<{ pending: number; sent: number; cancelled: number; total: number }>("/admin/followups/stats");
+
+export const processFollowups = () =>
+  apiFetch<{ processed: number; items: unknown[] }>("/admin/followups/process", { method: "POST" });
+
+// ─── V3: Salla Advanced ──────────────────────────────────────────────────────
+export const cancelSallaOrder = (order_reference: string, salla_token: string, reason = "change_mind") =>
+  apiFetch<{ success: boolean; error?: string; reference: string }>("/admin/salla/cancel-order", {
+    method: "POST",
+    body: JSON.stringify({ order_reference, salla_token, reason }),
+  });
+
+export const trackSallaShipment = (order_reference: string, salla_token: string) =>
+  apiFetch<{ found: boolean; tracking_number?: string; carrier?: string; tracking_url?: string; estimated_delivery?: string }>(
+    "/admin/salla/track-shipment",
+    { method: "POST", body: JSON.stringify({ order_reference, salla_token }) }
+  );
+
+// ─── V3: Agent Assist ─────────────────────────────────────────────────────────
+export const getAgentAssist = (escalationId: string) =>
+  apiFetch<{ suggestion: string; recommended_action: string; confidence: number; context: Record<string, unknown> }>(
+    `/admin/escalations/${escalationId}/assist`
+  );

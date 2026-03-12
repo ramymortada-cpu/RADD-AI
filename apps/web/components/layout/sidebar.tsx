@@ -14,6 +14,7 @@ import {
   TrendingUp,
   Radar,
   Sliders,
+  BarChart2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { clearTokens } from "@/lib/auth";
@@ -22,6 +23,7 @@ const NAV_ITEMS = [
   { href: "/dashboard", label: "الرئيسية", icon: LayoutDashboard },
   { href: "/conversations", label: "المحادثات", icon: MessageSquare },
   { href: "/customers", label: "ذاكرة العملاء", icon: Users },
+  { href: "/analytics", label: "تحليلات الأداء", icon: BarChart2 },
   { href: "/revenue", label: "العائد المالي", icon: TrendingUp },
   { href: "/radar", label: "الرادار التشغيلي", icon: Radar },
   { href: "/rules", label: "قواعد ذكية", icon: Sliders },

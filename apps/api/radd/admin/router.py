@@ -637,3 +637,245 @@ async def apply_starter_pack(
         if ws:
             ws.sector = body.sector
     return result
+
+
+# ─── V3: RADD Score ───────────────────────────────────────────────────────────
+
+@router.get("/radd-score")
+@limiter.limit(settings.default_rate_limit)
+async def get_radd_score(
+    request: Request,
+    current: Annotated[CurrentUser, Depends(require_reviewer)],
+    period_days: int = Query(30, ge=7, le=365),
+):
+    """Get RADD Score (0-100) for this workspace."""
+    from radd.analytics.radd_score import calculate_radd_score
+    async with get_db_session(current.workspace_id) as db:
+        score = await calculate_radd_score(db, str(current.workspace_id), period_days)
+    return {
+        "total": score.total,
+        "grade": score.grade,
+        "summary_ar": score.summary_ar,
+        "breakdown": {
+            "automation": score.automation_score,
+            "quality": score.quality_score,
+            "escalation_health": score.escalation_score,
+            "knowledge_coverage": score.knowledge_score,
+            "customer_happiness": score.happiness_score,
+        },
+        "period_days": period_days,
+    }
+
+
+# ─── V3: Churn Radar ─────────────────────────────────────────────────────────
+
+@router.get("/churn-radar")
+@limiter.limit(settings.default_rate_limit)
+async def get_churn_radar(
+    request: Request,
+    current: Annotated[CurrentUser, Depends(require_reviewer)],
+    inactive_days: int = Query(45, ge=7, le=180),
+):
+    """Detect customers at churn risk."""
+    from radd.analytics.churn_radar import scan_for_churn_risk, get_churn_summary
+    async with get_db_session(current.workspace_id) as db:
+        alerts = await scan_for_churn_risk(db, str(current.workspace_id), inactive_days)
+    summary = get_churn_summary(alerts)
+    return {
+        "summary": summary,
+        "alerts": [
+            {
+                "customer_id": a.customer_id,
+                "customer_tier": a.customer_tier,
+                "risk_level": a.risk_level.value,
+                "reason": a.reason,
+                "days_inactive": a.days_inactive,
+                "total_revenue": a.total_revenue,
+                "suggested_action": a.suggested_action,
+                "last_seen_at": a.last_seen_at,
+            }
+            for a in alerts[:100]
+        ],
+    }
+
+
+# ─── V3: Agent Performance ────────────────────────────────────────────────────
+
+@router.get("/agent-performance")
+@limiter.limit(settings.default_rate_limit)
+async def get_agent_performance(
+    request: Request,
+    current: Annotated[CurrentUser, Depends(require_admin)],
+    period_days: int = Query(30, ge=7, le=365),
+):
+    """Get performance metrics for all agents."""
+    from radd.analytics.agent_performance import get_agent_performance, get_team_summary
+    async with get_db_session(current.workspace_id) as db:
+        metrics = await get_agent_performance(db, str(current.workspace_id), period_days)
+    summary = get_team_summary(metrics)
+    return {
+        "summary": summary,
+        "agents": [
+            {
+                "user_id": m.user_id,
+                "agent_name": m.agent_name,
+                "total_assigned": m.total_assigned,
+                "total_resolved": m.total_resolved,
+                "resolution_rate": m.resolution_rate,
+                "avg_resolution_minutes": m.avg_resolution_minutes,
+                "avg_first_response_minutes": m.avg_first_response_minutes,
+                "estimated_csat": m.estimated_csat,
+            }
+            for m in metrics
+        ],
+        "period_days": period_days,
+    }
+
+
+# ─── V3: Follow-ups ──────────────────────────────────────────────────────────
+
+@router.get("/followups/stats")
+@limiter.limit(settings.default_rate_limit)
+async def get_followup_stats(
+    request: Request,
+    current: Annotated[CurrentUser, Depends(require_reviewer)],
+):
+    """Get follow-up queue statistics."""
+    from radd.followups.scheduler import get_followup_stats
+    async with get_db_session(current.workspace_id) as db:
+        stats = await get_followup_stats(db, str(current.workspace_id))
+    return stats
+
+
+@router.post("/followups/process")
+@limiter.limit("10/minute")
+async def process_followups(
+    request: Request,
+    current: Annotated[CurrentUser, Depends(require_admin)],
+):
+    """Manually trigger follow-up processing (normally runs on schedule)."""
+    from radd.followups.scheduler import process_due_followups
+    async with get_db_session(current.workspace_id) as db:
+        processed = await process_due_followups(db, str(current.workspace_id))
+    return {"processed": len(processed), "items": processed}
+
+
+# ─── V3: Salla Advanced Actions ───────────────────────────────────────────────
+
+class CancelOrderRequest(BaseModel):
+    order_reference: str
+    salla_token: str
+    reason: str = "change_mind"
+
+
+class TrackShipmentRequest(BaseModel):
+    order_reference: str
+    salla_token: str
+
+
+@router.post("/salla/cancel-order")
+@limiter.limit("20/minute")
+async def cancel_salla_order(
+    request: Request,
+    body: CancelOrderRequest,
+    current: Annotated[CurrentUser, Depends(require_admin)],
+):
+    """Cancel a Salla order by reference number."""
+    from radd.actions.salla_advanced import cancel_order
+    result = await cancel_order(
+        order_reference=body.order_reference,
+        access_token=body.salla_token,
+        reason=body.reason,
+    )
+    return result
+
+
+@router.post("/salla/track-shipment")
+@limiter.limit("30/minute")
+async def track_salla_shipment(
+    request: Request,
+    body: TrackShipmentRequest,
+    current: Annotated[CurrentUser, Depends(require_reviewer)],
+):
+    """Get real shipment tracking info for a Salla order."""
+    from radd.actions.salla_advanced import track_shipment
+    result = await track_shipment(
+        order_reference=body.order_reference,
+        access_token=body.salla_token,
+    )
+    return result
+
+
+# ─── V3: Agent Assist ─────────────────────────────────────────────────────────
+
+@router.get("/escalations/{escalation_id}/assist")
+@limiter.limit(settings.default_rate_limit)
+async def get_agent_assist(
+    request: Request,
+    escalation_id: uuid.UUID,
+    current: Annotated[CurrentUser, Depends(require_reviewer)],
+):
+    """Get AI-generated reply suggestion for an escalated conversation."""
+    from radd.db.models import EscalationEvent, Conversation, Customer, Message as MsgModel
+    from radd.intelligence.agent_assist import generate_agent_suggestion
+    from sqlalchemy import select as sa_select
+
+    async with get_db_session(current.workspace_id) as db:
+        esc_result = await db.execute(
+            sa_select(EscalationEvent).where(
+                EscalationEvent.id == escalation_id,
+                EscalationEvent.workspace_id == current.workspace_id,
+            )
+        )
+        esc = esc_result.scalar_one_or_none()
+        if not esc:
+            raise HTTPException(status_code=404, detail="Escalation not found")
+
+        # Get conversation + customer
+        conv_result = await db.execute(
+            sa_select(Conversation).where(Conversation.id == esc.conversation_id)
+        )
+        conversation = conv_result.scalar_one_or_none()
+
+        cust_result = await db.execute(
+            sa_select(Customer).where(Customer.id == conversation.customer_id)
+        )
+        customer = cust_result.scalar_one_or_none()
+
+        # Get recent messages
+        msgs_result = await db.execute(
+            sa_select(MsgModel)
+            .where(MsgModel.conversation_id == esc.conversation_id)
+            .order_by(MsgModel.created_at.desc())
+            .limit(8)
+        )
+        messages = [
+            {"sender_type": m.sender_type, "content": m.content}
+            for m in reversed(msgs_result.scalars().all())
+        ]
+
+    from radd.customers.context_builder import build_customer_context
+    customer_ctx = build_customer_context(customer) if customer else ""
+
+    last_msg = messages[-1]["content"] if messages else ""
+    suggestion = await generate_agent_suggestion(
+        customer_message=last_msg,
+        conversation_history=messages,
+        customer_context=customer_ctx,
+        kb_passages=[],
+        dialect=conversation.dialect or "gulf",
+        escalation_reason=esc.reason or "",
+    )
+
+    return {
+        "escalation_id": str(escalation_id),
+        "suggestion": suggestion.get("suggestion", ""),
+        "recommended_action": suggestion.get("recommended_action", "respond"),
+        "confidence": suggestion.get("confidence", 0),
+        "context": {
+            "customer_tier": customer.customer_tier if customer else "new",
+            "total_escalations": customer.total_escalations if customer else 0,
+            "dialect": conversation.dialect,
+            "stage": getattr(conversation, "stage", "unknown"),
+        },
+    }

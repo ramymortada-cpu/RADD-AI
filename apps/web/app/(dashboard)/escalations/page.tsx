@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { AlertTriangle, UserCheck, CheckCircle2, Clock } from "lucide-react";
+import { AlertTriangle, UserCheck, CheckCircle2, Clock, Sparkles } from "lucide-react";
 import TopBar from "@/components/layout/topbar";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -11,6 +11,7 @@ import {
   getEscalations,
   acceptEscalation,
   resolveEscalation,
+  getAgentAssist,
   type Escalation,
   type EscalationStatus,
 } from "@/lib/api";
@@ -29,6 +30,20 @@ export default function EscalationsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [resolveNotes, setResolveNotes] = useState<Record<string, string>>({});
+  const [assistSuggestions, setAssistSuggestions] = useState<Record<string, string>>({});
+  const [assistLoading, setAssistLoading] = useState<Record<string, boolean>>({});
+
+  async function handleGetAssist(escalationId: string) {
+    setAssistLoading((l) => ({ ...l, [escalationId]: true }));
+    try {
+      const result = await getAgentAssist(escalationId);
+      setAssistSuggestions((s) => ({ ...s, [escalationId]: result.suggestion }));
+    } catch {
+      setAssistSuggestions((s) => ({ ...s, [escalationId]: "تعذّر جلب الاقتراح" }));
+    } finally {
+      setAssistLoading((l) => ({ ...l, [escalationId]: false }));
+    }
+  }
 
   useEffect(() => {
     loadEscalations();
@@ -174,6 +189,25 @@ export default function EscalationsPage() {
                     <div className="border-s-2 border-primary/40 ps-3 text-sm text-muted-foreground italic arabic-text">
                       مسودة الرد: {esc.rag_draft}
                     </div>
+                  )}
+
+                  {/* Agent Assist */}
+                  {assistSuggestions[esc.id] ? (
+                    <div className="border-s-2 border-amber-400 ps-3 bg-amber-50 rounded-r-lg py-2">
+                      <p className="text-xs text-amber-700 font-medium mb-1 flex items-center gap-1">
+                        <Sparkles className="h-3 w-3" /> اقتراح AI للرد:
+                      </p>
+                      <p className="text-sm arabic-text">{assistSuggestions[esc.id]}</p>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => handleGetAssist(esc.id)}
+                      disabled={assistLoading[esc.id]}
+                      className="flex items-center gap-1 text-xs text-amber-600 hover:text-amber-700 transition-colors"
+                    >
+                      <Sparkles className="h-3 w-3" />
+                      {assistLoading[esc.id] ? "جارٍ التوليد..." : "احصل على اقتراح AI"}
+                    </button>
                   )}
 
                   {/* Actions */}
