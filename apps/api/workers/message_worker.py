@@ -403,7 +403,31 @@ async def process_message(msg_data: dict) -> None:
     else:
         final_response = guard.redacted_text
 
+    # ── Step 16b: Schedule follow-up if needed ───────────────────────────────
+    should_schedule_followup = (
+        new_stage.value in ("consideration", "objection", "inquiry")
+        if hasattr(new_stage, "value") else False
+    )
+    if should_schedule_followup and not pipeline_result.resolution_type.startswith("escalated"):
+        try:
+            from radd.followups.scheduler import schedule_abandoned_sale_followup
+            await schedule_abandoned_sale_followup(
+                db_session=db,
+                workspace_id=str(workspace_id),
+                conversation_id=str(conversation.id),
+                customer_id=str(customer.id),
+                product_name="",
+                delay_minutes=120,
+            )
+            logger.info("worker.followup_scheduled", stage=str(new_stage))
+        except Exception as e:
+            logger.warning("worker.followup_schedule_failed", error=str(e))
+
     # ── Step 17: Send (or log-only in shadow mode) ───────────────────────────
+    channel_config = channel.config or {}
+    wa_phone_number_id = channel_config.get("wa_phone_number_id") or settings.wa_phone_number_id
+    wa_token = settings.wa_api_token
+
     if settings.shadow_mode:
         logger.info(
             "worker.shadow_mode.suppressed",
@@ -415,13 +439,36 @@ async def process_message(msg_data: dict) -> None:
         )
     else:
         try:
-            channel_config = channel.config or {}
-            await send_text_message(
-                phone_number=sender_phone,
-                message=final_response,
-                phone_number_id=channel_config.get("wa_phone_number_id") or settings.wa_phone_number_id,
-                api_token=settings.wa_api_token,
-            )
+            # Use interactive message for return prevention responses
+            if prevention_response and pipeline_result.resolution_type != "escalated_hard":
+                from radd.whatsapp.interactive import build_return_prevention_message, send_interactive_message
+                from radd.returns.prevention import detect_return_reason
+                return_reason = detect_return_reason(text_body)
+                interactive_payload = build_return_prevention_message(
+                    reason=str(return_reason),
+                    dialect=dialect.dialect if hasattr(dialect, "dialect") else "gulf",
+                )
+                sent = await send_interactive_message(
+                    phone_number=sender_phone,
+                    message_payload=interactive_payload,
+                    phone_number_id=wa_phone_number_id,
+                    api_token=wa_token,
+                )
+                if not sent:
+                    # Fallback to plain text
+                    await send_text_message(
+                        phone_number=sender_phone,
+                        message=final_response,
+                        phone_number_id=wa_phone_number_id,
+                        api_token=wa_token,
+                    )
+            else:
+                await send_text_message(
+                    phone_number=sender_phone,
+                    message=final_response,
+                    phone_number_id=wa_phone_number_id,
+                    api_token=wa_token,
+                )
         except Exception as e:
             logger.error("worker.send_failed", error=str(e), phone=sender_phone)
 

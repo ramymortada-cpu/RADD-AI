@@ -151,6 +151,121 @@ async def track_shipment(
             return {"found": False, "error": "network_error", "reference": order_reference}
 
 
+async def create_return_request(
+    order_reference: str,
+    access_token: str,
+    reason: str = "wrong_item",
+    items: list[dict] | None = None,
+) -> dict:
+    """
+    Create a return request for a Salla order.
+    Initiates the official return process via Salla API.
+    """
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+    }
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        try:
+            # Find the order first
+            search_resp = await client.get(
+                f"{SALLA_API_BASE}/orders",
+                headers=headers,
+                params={"reference_id": order_reference, "per_page": 1},
+            )
+            search_resp.raise_for_status()
+            orders = search_resp.json().get("data", [])
+
+            if not orders:
+                return {"success": False, "error": "not_found", "reference": order_reference}
+
+            order = orders[0]
+            order_id = order.get("id")
+            status = order.get("status", {}).get("slug", "")
+
+            # Only delivered orders can be returned
+            if status not in ("delivered",):
+                return {
+                    "success": False,
+                    "error": "not_eligible",
+                    "status": status,
+                    "reference": order_reference,
+                }
+
+            # Create return
+            return_payload: dict = {"reason": reason}
+            if items:
+                return_payload["items"] = items
+
+            return_resp = await client.post(
+                f"{SALLA_API_BASE}/orders/{order_id}/returns",
+                headers=headers,
+                json=return_payload,
+            )
+
+            if return_resp.status_code in (200, 201):
+                return_data = return_resp.json().get("data", {})
+                return {
+                    "success": True,
+                    "return_id": str(return_data.get("id", "")),
+                    "order_id": str(order_id),
+                    "reference": order_reference,
+                    "status": return_data.get("status", "pending"),
+                }
+            else:
+                return {
+                    "success": False,
+                    "error": "api_rejected",
+                    "status_code": return_resp.status_code,
+                    "reference": order_reference,
+                }
+
+        except Exception as e:
+            logger.error("salla.create_return_failed", error=str(e), ref=order_reference)
+            return {"success": False, "error": "network_error", "reference": order_reference}
+
+
+def format_return_response(result: dict, dialect: str = "gulf") -> str:
+    """Format return creation result as Arabic message."""
+    ref = result.get("reference", "")
+
+    if result.get("success"):
+        return_id = result.get("return_id", "")
+        msgs = {
+            "gulf": f"تم إنشاء طلب الإرجاع لطلبك رقم {ref} بنجاح. رقم الإرجاع: {return_id}. سيتواصل معك فريقنا لترتيب الاستلام.",
+            "egyptian": f"تم إنشاء طلب الإرجاع لطلبك رقم {ref} بنجاح. رقم الإرجاع: {return_id}. فريقنا هيتواصل معاك لترتيب الاستلام.",
+            "msa": f"تم إنشاء طلب الإرجاع للطلب رقم {ref} بنجاح. رقم الإرجاع: {return_id}. سيتواصل فريقنا معك لترتيب الاستلام.",
+        }
+        return msgs.get(dialect, msgs["gulf"])
+
+    error = result.get("error", "")
+    if error == "not_found":
+        msgs = {
+            "gulf": f"ما قدرت أجد طلب رقم {ref}.",
+            "egyptian": f"مش لاقي طلب رقم {ref}.",
+            "msa": f"لم أجد طلباً برقم {ref}.",
+        }
+        return msgs.get(dialect, msgs["gulf"])
+
+    if error == "not_eligible":
+        status = result.get("status", "")
+        msgs = {
+            "gulf": f"للأسف ما يمكن إرجاع طلب رقم {ref} لأن حالته '{status}'. الإرجاع متاح للطلبات المستلمة فقط.",
+            "egyptian": f"لأسف مش ممكن إرجاع طلب رقم {ref} لأن حالته '{status}'. الإرجاع للطلبات المستلمة بس.",
+            "msa": f"لا يمكن إرجاع الطلب رقم {ref} لأن حالته '{status}'. الإرجاع متاح للطلبات المستلمة فقط.",
+        }
+        return msgs.get(dialect, msgs["gulf"])
+
+    msgs = {
+        "gulf": "صارت مشكلة في إنشاء طلب الإرجاع. سأحولك لفريقنا لمساعدتك.",
+        "egyptian": "حصل مشكلة في طلب الإرجاع. هحولك للفريق.",
+        "msa": "حدث خطأ أثناء إنشاء طلب الإرجاع. سيتولى فريقنا مساعدتك.",
+    }
+    return msgs.get(dialect, msgs["gulf"])
+
+
 def format_cancel_response(result: dict, dialect: str = "gulf") -> str:
     """Format cancel order result as Arabic message."""
     ref = result.get("reference", "")

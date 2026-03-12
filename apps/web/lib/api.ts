@@ -644,3 +644,10 @@ export const getAgentAssist = (escalationId: string) =>
   apiFetch<{ suggestion: string; recommended_action: string; confidence: number; context: Record<string, unknown> }>(
     `/admin/escalations/${escalationId}/assist`
   );
+
+// ─── V3: Create Return ────────────────────────────────────────────────────────
+export const createSallaReturn = (order_reference: string, salla_token: string, reason = "wrong_item") =>
+  apiFetch<{ success: boolean; return_id?: string; error?: string; reference: string }>(
+    "/admin/salla/create-return",
+    { method: "POST", body: JSON.stringify({ order_reference, salla_token, reason }) }
+  );

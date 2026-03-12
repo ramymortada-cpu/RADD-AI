@@ -879,3 +879,28 @@ async def get_agent_assist(
             "stage": getattr(conversation, "stage", "unknown"),
         },
     }
+
+
+# ─── V3: Create Return (Salla) ────────────────────────────────────────────────
+
+class CreateReturnRequest(BaseModel):
+    order_reference: str
+    salla_token: str
+    reason: str = "wrong_item"
+
+
+@router.post("/salla/create-return")
+@limiter.limit("20/minute")
+async def create_salla_return(
+    request: Request,
+    body: CreateReturnRequest,
+    current: Annotated[CurrentUser, Depends(require_admin)],
+):
+    """Create a return request for a Salla order."""
+    from radd.actions.salla_advanced import create_return_request
+    result = await create_return_request(
+        order_reference=body.order_reference,
+        access_token=body.salla_token,
+        reason=body.reason,
+    )
+    return result

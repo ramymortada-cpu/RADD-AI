@@ -58,4 +58,16 @@ async def detect_and_run_action(
             response = format_cancel_response(result, dialect)
             return ActionResult(action="cancel_order", response_text=response, data=result)
 
+    # ── Create Return ─────────────────────────────────────────────────────────
+    return_keywords = ["أرجع", "إرجاع", "ارجع", "ابي ارجع", "ابغى ارجع", "عايز ارجع", "طلب إرجاع", "استرجاع"]
+    if any(kw in message for kw in return_keywords):
+        from radd.actions.salla import extract_order_number
+        from radd.actions.salla_advanced import create_return_request, format_return_response
+        order_number = extract_order_number(message)
+        if order_number and salla_token:
+            result = await create_return_request(order_number, salla_token)
+            if result.get("success"):
+                response = format_return_response(result, dialect)
+                return ActionResult(action="create_return", response_text=response, data=result)
+
     return None
