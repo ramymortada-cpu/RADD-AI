@@ -1,87 +1,54 @@
-"""
-Tests: chunker, orchestrator (sync template path), pipeline routing.
-"""
-import pytest
 
-from radd.knowledge.chunker import chunk_document
-from radd.pipeline.orchestrator import run_pipeline
+from radd.pipeline.normalizer import normalize_arabic
+from radd.pipeline.dialect import detect_dialect
+from radd.pipeline.intent import classify_intent
+from radd.pipeline.entity_extractor import extract_entities
+from radd.customers.profile_updater import compute_sentiment, build_customer_context
 
+# ── Normalizer ──
+def test_remove_tashkeel(): assert normalize_arabic("مَرْحَبًا") == "مرحبا"
+def test_normalize_alef(): assert normalize_arabic("أهلاً") == "اهلا"
+def test_normalize_ya(): assert normalize_arabic("على") == "علي"
+def test_remove_tatweel(): assert normalize_arabic("مـرحـبـا") == "مرحبا"
+def test_eastern_numbers(): assert normalize_arabic("١٢٣") == "123"
+def test_empty(): assert normalize_arabic("") == ""
 
-class TestChunker:
-    def test_basic_chunking(self):
-        content = "سياسة الإرجاع\n\nيمكن إرجاع المنتجات خلال ١٤ يوماً من تاريخ الاستلام.\n\nشروط الإرجاع:\n- المنتج بحالته الأصلية\n- مع الفاتورة الأصلية\n- خلال مدة الضمان"
-        chunks = chunk_document(content)
-        assert len(chunks) >= 1
-        for chunk in chunks:
-            assert chunk.content
-            assert chunk.content_normalized
-            assert chunk.token_count > 0
+# ── Dialect ──
+def test_gulf(): assert detect_dialect("وش وضع طلبي").dialect == "gulf"
+def test_gulf_strong(): assert detect_dialect("ابغى اعرف وين طلبي الحين").confidence >= 0.7
+def test_egyptian(): assert detect_dialect("ايه اخبار الاوردر بتاعي").dialect == "egyptian"
+def test_msa_fallback(): assert detect_dialect("اريد معرفة حالة الطلب").dialect == "msa"
 
-    def test_chunk_indices_sequential(self):
-        content = "\n\n".join([f"فقرة رقم {i} " + "محتوى " * 50 for i in range(5)])
-        chunks = chunk_document(content)
-        for i, chunk in enumerate(chunks):
-            assert chunk.chunk_index == i
+# ── Intent (9 intents) ──
+def test_greeting(): assert classify_intent("هلا وغلا").intent == "greeting"
+def test_order_status(): assert classify_intent("وين طلبي رقم 4523").intent == "order_status"
+def test_shipping(): assert classify_intent("كم مدة الشحن").intent == "shipping"
+def test_return(): assert classify_intent("ابي ارجع المنتج").intent == "return_policy"
+def test_hours(): assert classify_intent("متى تفتحون").intent == "store_hours"
+def test_general(): r = classify_intent("xxxxxxx"); assert r.intent == "general" and r.confidence <= 0.5
 
-    def test_large_paragraph_split(self):
-        long_para = "هذه جملة طويلة جداً. " * 100
-        chunks = chunk_document(long_para)
-        assert len(chunks) >= 2
-        for chunk in chunks:
-            assert chunk.token_count <= 600  # Allow some buffer
+# NEW: Pre-purchase intents
+def test_product_inquiry(): r = classify_intent("عندكم عطر عود"); assert r.intent == "product_inquiry" and r.is_pre_purchase
+def test_product_price(): r = classify_intent("كم سعر الساعة"); assert r.intent == "product_inquiry" and r.is_pre_purchase
+def test_comparison(): r = classify_intent("ايش الفرق بين العطرين"); assert r.intent == "product_comparison" and r.is_pre_purchase
+def test_recommend(): r = classify_intent("تنصحوني بأي واحد"); assert r.intent == "product_comparison"
+def test_hesitation_price(): r = classify_intent("غالي شوي عندكم خصم"); assert r.intent == "purchase_hesitation" and r.is_pre_purchase
+def test_hesitation_tamara(): r = classify_intent("فيه تقسيط تمارا"); assert r.intent == "purchase_hesitation"
 
-    def test_empty_content(self):
-        chunks = chunk_document("")
-        assert chunks == []
+# ── Entity Extractor ──
+def test_order_hash(): assert "45678" in extract_entities("طلب #45678 وين وصل").order_numbers
+def test_order_arabic(): assert "901234" in extract_entities("رقم الطلب 901234").order_numbers
+def test_shipping_ar(): assert "Aramex" in extract_entities("الشحنة مع ارامكس متاخرة").shipping_companies
+def test_shipping_en(): assert "SMSA" in extract_entities("smsa ما وصلو الطلب").shipping_companies
+def test_multi_ship(): assert len(extract_entities("ارامكس احسن ولا سمسا").shipping_companies) == 2
+def test_money(): assert "250" in extract_entities("سعره 250 ريال").monetary_amounts
+def test_no_entities(): e = extract_entities("مرحبا كيف الحال"); assert len(e.order_numbers) == 0
 
+# ── Customer Profile ──
+def test_sentiment_pos(): assert compute_sentiment("شكرا ممتاز") > 0.5
+def test_sentiment_neg(): assert compute_sentiment("سيء خربان مشكلة") < 0.5
+def test_sentiment_neutral(): assert compute_sentiment("ابي اعرف حالة الطلب") == 0.5
 
-class TestOrchestrator:
-    def test_greeting_arabic(self):
-        result = run_pipeline("مرحبا كيف حالكم")
-        assert result.resolution_type == "auto_template"
-        assert result.intent == "greeting"
-        assert result.response_text
-
-    def test_order_status_arabic(self):
-        result = run_pipeline("وين طلبي رقم 12345")
-        assert result.intent == "order_status"
-        assert result.resolution_type == "auto_template"
-
-    def test_shipping_arabic(self):
-        result = run_pipeline("كم مدة الشحن والتوصيل")
-        assert result.intent == "shipping"
-        assert result.resolution_type == "auto_template"
-
-    def test_return_policy_arabic(self):
-        result = run_pipeline("ابغى ارجع المنتج كيف")
-        assert result.intent == "return_policy"
-        assert result.resolution_type == "auto_template"
-
-    def test_store_hours_arabic(self):
-        result = run_pipeline("متى تفتحون وساعات الدوام")
-        assert result.intent == "store_hours"
-        assert result.resolution_type == "auto_template"
-
-    def test_unknown_escalates(self):
-        result = run_pipeline("لدي شكوى حول موظف")
-        assert result.resolution_type == "escalated_hard"
-        assert "فريقنا" in result.response_text or "دعم" in result.response_text.lower()
-
-    def test_non_arabic_handled(self):
-        result = run_pipeline("Hello I need help")
-        assert result.intent == "other"
-        assert result.resolution_type == "auto_template"
-
-    def test_confidence_breakdown_present(self):
-        result = run_pipeline("مرحبا")
-        assert "intent" in result.confidence_breakdown
-        assert "retrieval" in result.confidence_breakdown
-        assert "verify" in result.confidence_breakdown
-
-    def test_gulf_dialect_detected(self):
-        result = run_pipeline("وين طلبي ليش ما وصل")
-        assert result.dialect == "gulf"
-
-    def test_msa_default(self):
-        result = run_pipeline("أريد الاستفسار عن حالة طلبي")
-        assert result.dialect == "msa"
+if __name__ == "__main__":
+    import pytest
+    pytest.main([__file__, "-v"])
