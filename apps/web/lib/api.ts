@@ -435,6 +435,40 @@ export const getSAAuditLog = (params?: {
   );
 };
 
+// ─── Customers ────────────────────────────────────────────────────────────────
+export interface CustomerProfile {
+  id: string;
+  display_name: string | null;
+  phone_hash: string;
+  customer_tier: "new" | "standard" | "returning" | "vip" | "at_risk";
+  total_conversations: number;
+  total_escalations: number;
+  avg_sentiment: number | null;
+  salla_total_orders: number;
+  salla_total_revenue: number;
+  last_seen_at: string | null;
+  last_complaint_at: string | null;
+  created_at: string | null;
+}
+
+export const getCustomers = (tier?: string, page = 1) => {
+  const p = new URLSearchParams({ page: String(page) });
+  if (tier) p.set("tier", tier);
+  return apiFetch<{ items: CustomerProfile[]; total: number; page: number; page_size: number }>(
+    `/admin/customers?${p.toString()}`
+  );
+};
+
+// ─── Shadow Mode ──────────────────────────────────────────────────────────────
+export const getShadowMode = () =>
+  apiFetch<{ shadow_mode: boolean }>("/admin/shadow-mode");
+
+export const setShadowMode = (enabled: boolean) =>
+  apiFetch<{ shadow_mode: boolean; message: string }>("/admin/shadow-mode", {
+    method: "POST",
+    body: JSON.stringify({ enabled }),
+  });
+
 // ─── Intelligence ──────────────────────────────────────────────────────────────
 export interface KnowledgeGap {
   question_pattern: string;

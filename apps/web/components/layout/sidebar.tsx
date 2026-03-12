@@ -10,6 +10,7 @@ import {
   Settings,
   LogOut,
   Zap,
+  Users,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { clearTokens } from "@/lib/auth";
@@ -17,6 +18,7 @@ import { clearTokens } from "@/lib/auth";
 const NAV_ITEMS = [
   { href: "/dashboard", label: "الرئيسية", icon: LayoutDashboard },
   { href: "/conversations", label: "المحادثات", icon: MessageSquare },
+  { href: "/customers", label: "ذاكرة العملاء", icon: Users },
   { href: "/knowledge", label: "قاعدة المعرفة", icon: BookOpen },
   { href: "/escalations", label: "التصعيدات", icon: AlertTriangle },
   { href: "/settings", label: "الإعدادات", icon: Settings },

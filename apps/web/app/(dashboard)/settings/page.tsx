@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Save, UserPlus } from "lucide-react";
+import { Save, UserPlus, Eye, EyeOff } from "lucide-react";
 import TopBar from "@/components/layout/topbar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,6 +12,8 @@ import {
   updateSettings,
   getUsers,
   createUser,
+  getShadowMode,
+  setShadowMode,
   type WorkspaceSettings,
   type User,
 } from "@/lib/api";
@@ -28,6 +30,10 @@ export default function SettingsPage() {
   const [autoThreshold, setAutoThreshold] = useState("0.85");
   const [softThreshold, setSoftThreshold] = useState("0.60");
 
+  // Shadow mode
+  const [shadowMode, setShadowModeState] = useState(false);
+  const [shadowLoading, setShadowLoading] = useState(false);
+
   // New user form
   const [showNewUser, setShowNewUser] = useState(false);
   const [newUser, setNewUser] = useState({
@@ -39,19 +45,33 @@ export default function SettingsPage() {
   const [creatingUser, setCreatingUser] = useState(false);
 
   useEffect(() => {
-    Promise.all([getSettings(), getUsers()])
-      .then(([s, u]) => {
+    Promise.all([getSettings(), getUsers(), getShadowMode()])
+      .then(([s, u, sm]) => {
         setWsSettings(s);
         setUsers(u);
-        const settings = s.settings as Record<string, unknown>;
-        if (settings.confidence_auto_threshold)
-          setAutoThreshold(String(settings.confidence_auto_threshold));
-        if (settings.confidence_soft_escalation_threshold)
-          setSoftThreshold(String(settings.confidence_soft_escalation_threshold));
+        setShadowModeState(sm.shadow_mode);
+        const wsSettings = s.settings as Record<string, unknown>;
+        if (wsSettings.confidence_auto_threshold)
+          setAutoThreshold(String(wsSettings.confidence_auto_threshold));
+        if (wsSettings.confidence_soft_escalation_threshold)
+          setSoftThreshold(String(wsSettings.confidence_soft_escalation_threshold));
       })
       .catch(() => setError("تعذّر تحميل الإعدادات"))
       .finally(() => setLoading(false));
   }, []);
+
+  async function handleToggleShadowMode() {
+    setShadowLoading(true);
+    try {
+      const res = await setShadowMode(!shadowMode);
+      setShadowModeState(res.shadow_mode);
+      setSuccess(res.shadow_mode ? "تم تفعيل وضع المراقبة — رَدّ لن يرسل ردوداً للعملاء" : "تم إيقاف وضع المراقبة — رَدّ يرد على العملاء الآن");
+    } catch {
+      setError("تعذّر تغيير وضع المراقبة");
+    } finally {
+      setShadowLoading(false);
+    }
+  }
 
   async function handleSave() {
     setSaving(true);
@@ -191,6 +211,38 @@ export default function SettingsPage() {
               <Save className="h-4 w-4 me-2" />
               {saving ? "جارٍ الحفظ..." : "حفظ الإعدادات"}
             </Button>
+          </CardContent>
+        </Card>
+
+        {/* Shadow Mode */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2">
+              {shadowMode ? <EyeOff className="h-4 w-4 text-amber-500" /> : <Eye className="h-4 w-4 text-green-600" />}
+              وضع المراقبة (Shadow Mode)
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              عند تفعيله، يعمل رَدّ بشكل طبيعي ويسجّل جميع الردود
+              <strong className="text-foreground"> لكنه لا يرسلها للعملاء</strong>.
+              مثالي لتجربة 48 ساعة قبل الإطلاق الرسمي.
+            </p>
+            <div className={`flex items-center gap-4 p-4 rounded-lg border ${shadowMode ? "bg-amber-50 border-amber-200" : "bg-green-50 border-green-200"}`}>
+              <div className={`h-3 w-3 rounded-full ${shadowMode ? "bg-amber-400 animate-pulse" : "bg-green-500"}`} />
+              <span className={`text-sm font-medium ${shadowMode ? "text-amber-700" : "text-green-700"}`}>
+                {shadowMode ? "وضع المراقبة مفعّل — لا يُرسل ردود" : "النظام يعمل بشكل طبيعي"}
+              </span>
+              <Button
+                variant={shadowMode ? "destructive" : "outline"}
+                size="sm"
+                className="ms-auto"
+                onClick={handleToggleShadowMode}
+                disabled={shadowLoading}
+              >
+                {shadowLoading ? "جارٍ التغيير..." : shadowMode ? "إيقاف وضع المراقبة" : "تفعيل وضع المراقبة"}
+              </Button>
+            </div>
           </CardContent>
         </Card>
 
