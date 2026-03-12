@@ -60,10 +60,9 @@ async def seed():
 
         wid = workspace.id
 
-        # ── RLS context ───────────────────────────────────────────────────────
+        # ── RLS context (use string interpolation — SET LOCAL doesn't support $1) ─
         await db.execute(
-            text("SET LOCAL app.current_workspace_id = :wid"),
-            {"wid": str(wid)},
+            text(f"SET LOCAL app.current_workspace_id = '{wid}'")
         )
 
         # ── Users ─────────────────────────────────────────────────────────────
@@ -92,6 +91,7 @@ async def seed():
             is_active=True,
         )
         db.add_all([owner, agent, reviewer])
+        await db.flush()  # get owner.id for KB docs
 
         # ── WhatsApp channel ──────────────────────────────────────────────────
         channel = Channel(
@@ -254,6 +254,8 @@ async def seed():
                     content_type=doc["content_type"],
                     status=doc["status"],
                     version=doc["version"],
+                    uploaded_by_user_id=owner.id,
+                    approved_by_user_id=owner.id,
                 )
             )
 

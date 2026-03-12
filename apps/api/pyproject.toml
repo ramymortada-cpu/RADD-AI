@@ -26,10 +26,9 @@ dependencies = [
     "httpx>=0.28.0",
     # OpenAI
     "openai>=1.57.0",
-    # NLP
+    # NLP — camel-tools removed (camel-kenlm build fails on arm64; using keyword-based NLP instead)
     "transformers>=4.0.0,<4.44.0",
     "torch>=2.5.0",
-    "camel-tools>=1.5.4",
     # Utilities
     "python-multipart>=0.0.12",
     "structlog>=24.4.0",
@@ -38,6 +37,8 @@ dependencies = [
     "slowapi>=0.1.9",
     "sentry-sdk[fastapi]>=2.5.1",
     "tokenizers>=0.20.0",
+    "pydantic[email]>=2.12.5",
+    "email-validator>=2.3.0",
 ]
 
 [tool.uv]
