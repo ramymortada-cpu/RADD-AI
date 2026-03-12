@@ -13,7 +13,7 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { clearTokens } from "@/lib/auth";
+import { logout } from "@/lib/api";
 
 const NAV_ITEMS = [
   { href: "/superadmin", label: "نظرة عامة", icon: Globe, exact: true },
@@ -28,8 +28,8 @@ export default function SASidebar() {
   const pathname = usePathname();
   const router = useRouter();
 
-  function handleLogout() {
-    clearTokens();
+  async function handleLogout() {
+    await logout();
     router.replace("/login");
   }
 

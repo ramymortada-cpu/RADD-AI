@@ -3,12 +3,13 @@ from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi.security import HTTPAuthorizationCredentials
 from radd.limiter import limiter
 from radd.config import settings
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from radd.auth.middleware import CurrentUser, get_current_user
+from radd.auth.middleware import CurrentUser, bearer_scheme, get_current_user
 from radd.auth.schemas import LoginRequest, RefreshRequest, TokenResponse, UserResponse
 from radd.auth.service import (
     authenticate_user,
@@ -93,15 +94,26 @@ async def logout(
     request: Request,
     body: RefreshRequest,
     current: Annotated[CurrentUser, Depends(get_current_user)],
+    credentials: Annotated[HTTPAuthorizationCredentials, Depends(bearer_scheme)],
 ):
     """
     Logout: blacklist both the current access token and the provided refresh token.
-    The client must send the refresh token in the body.
+    Client sends: Authorization: Bearer <access_token>, body: { refresh_token }.
     """
     from datetime import timezone
-    from fastapi.security import HTTPAuthorizationCredentials
 
-    # Blacklist the refresh token for its remaining lifetime
+    # Blacklist access token — invalidates session immediately
+    access_token = credentials.credentials
+    try:
+        payload = decode_token(access_token)
+        exp = payload.get("exp", 0)
+        remaining = max(0, int(exp - datetime.now(timezone.utc).timestamp()))
+        if remaining > 0:
+            await blacklist_token(access_token, remaining)
+    except ValueError:
+        pass
+
+    # Blacklist refresh token — prevents token rotation
     try:
         payload = decode_token(body.refresh_token)
         old_exp = payload.get("exp", 0)
@@ -109,7 +121,7 @@ async def logout(
         if remaining > 0:
             await blacklist_token(body.refresh_token, remaining)
     except ValueError:
-        pass  # Already invalid — that's fine
+        pass
 
 
 @router.get("/me", response_model=UserResponse)

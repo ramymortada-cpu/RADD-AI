@@ -27,6 +27,32 @@ export async function login(
   return res.json();
 }
 
+/** Call logout API to blacklist tokens, then clear local storage. Fire-and-forget — always clears locally. */
+export async function logout(): Promise<void> {
+  const accessToken = typeof window !== "undefined" ? localStorage.getItem("radd_access_token") : null;
+  const refreshToken = typeof window !== "undefined" ? localStorage.getItem("radd_refresh_token") : null;
+
+  if (accessToken && refreshToken) {
+    try {
+      await fetch(`${API_BASE}/auth/logout`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ refresh_token: refreshToken }),
+      });
+    } catch {
+      // Network error — still clear locally
+    }
+  }
+
+  if (typeof window !== "undefined") {
+    localStorage.removeItem("radd_access_token");
+    localStorage.removeItem("radd_refresh_token");
+  }
+}
+
 // ─── Authenticated fetch ──────────────────────────────────────────────────────
 
 function getToken(): string | null {

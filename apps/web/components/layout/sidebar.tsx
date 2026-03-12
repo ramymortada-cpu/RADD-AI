@@ -20,7 +20,7 @@ import {
   Radio,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { clearTokens } from "@/lib/auth";
+import { logout } from "@/lib/api";
 
 const NAV_ITEMS = [
   { href: "/dashboard", label: "الرئيسية", icon: LayoutDashboard },
@@ -42,8 +42,8 @@ export default function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
 
-  function handleLogout() {
-    clearTokens();
+  async function handleLogout() {
+    await logout();
     router.replace("/login");
   }
 
