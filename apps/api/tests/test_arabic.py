@@ -90,7 +90,56 @@ class TestIntentClassifier:
         r = classify_intent("متى تفتحون ساعات الدوام")
         assert r.intent == "store_hours"
 
-    def test_other(self):
+    def test_unmatched_returns_general(self):
         r = classify_intent("تواصل مع المدير بخصوص شكوى")
-        assert r.intent == "other"
+        assert r.intent == "general"
         assert r.confidence <= 0.5
+
+    # ── 3 new intents (Cursor Prompt 3) ──────────────────────────────────────
+
+    def test_product_inquiry_price(self):
+        r = classify_intent("كم سعر العطر الجديد؟")
+        assert r.intent == "product_inquiry"
+        assert r.confidence >= 0.7
+
+    def test_product_inquiry_available(self):
+        r = classify_intent("عندكم مقاس L متوفر؟")
+        assert r.intent == "product_inquiry"
+        assert r.confidence >= 0.7
+
+    def test_product_inquiry_details(self):
+        r = classify_intent("ايش مواصفات الساعة الذهبية؟")
+        assert r.intent == "product_inquiry"
+        assert r.confidence >= 0.6
+
+    def test_product_comparison_which_better(self):
+        r = classify_intent("ايهم أفضل العطر الأول ولا الثاني؟")
+        assert r.intent == "product_comparison"
+        assert r.confidence >= 0.7
+
+    def test_product_comparison_difference(self):
+        r = classify_intent("إيش الفرق بين المنتجين؟")
+        assert r.intent == "product_comparison"
+        assert r.confidence >= 0.7
+
+    def test_purchase_hesitation_expensive(self):
+        r = classify_intent("غالي شوي، فيه خصم؟")
+        assert r.intent == "purchase_hesitation"
+        assert r.confidence >= 0.7
+
+    def test_purchase_hesitation_thinking(self):
+        r = classify_intent("بفكر في الموضوع")
+        assert r.intent == "purchase_hesitation"
+        assert r.confidence >= 0.6
+
+    def test_purchase_hesitation_installment(self):
+        r = classify_intent("ممكن بالتقسيط تابي؟")
+        assert r.intent == "purchase_hesitation"
+        assert r.confidence >= 0.6
+
+    def test_pre_purchase_flag(self):
+        """All 3 new intents should be flagged as pre-purchase."""
+        from radd.pipeline.intent import PRE_PURCHASE_INTENTS
+        assert "product_inquiry" in PRE_PURCHASE_INTENTS
+        assert "product_comparison" in PRE_PURCHASE_INTENTS
+        assert "purchase_hesitation" in PRE_PURCHASE_INTENTS
