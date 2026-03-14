@@ -12,6 +12,7 @@ help:
 	@echo "  make seed      — Seed development data (1 workspace, 2 users, 1 channel)"
 	@echo "  make api       — Start FastAPI development server on :8000"
 	@echo "  make worker    — Start message worker (Redis Streams consumer)"
+	@echo "  make worker-v2 — Start message worker v2 (scalable, per-workspace streams)"
 	@echo "  make web       — Start Next.js development server on :3000"
 	@echo "  make test      — Run all tests (pytest + vitest)"
 	@echo "  make test-api  — Run backend tests only"
@@ -47,6 +48,9 @@ api:
 
 worker:
 	cd apps/api && uv run python -m workers.message_worker
+
+worker-v2:
+	cd apps/api && uv run python -m workers.message_worker_v2
 
 web:
 	cd apps/web && pnpm dev

@@ -2,9 +2,9 @@ from __future__ import annotations
 """
 RADD AI — Arabic Voice Understanding
 WhatsApp voice note → Whisper transcription → Arabic text → pipeline.
+Uses tempfile to avoid holding large audio bytes in memory.
 """
-import base64
-import io
+import tempfile
 import structlog
 from openai import AsyncOpenAI
 
@@ -20,23 +20,22 @@ async def transcribe_voice_note(
 ) -> dict:
     """
     Transcribe a voice note using OpenAI Whisper.
-    Supports Arabic (ar) as primary language.
-    Returns transcription dict.
+    Writes to tempfile to avoid holding audio in memory during API call.
     """
     client = AsyncOpenAI(api_key=settings.openai_api_key)
 
-    # Wrap in file-like object
-    audio_file = io.BytesIO(audio_data)
-    audio_file.name = f"voice_note.{audio_format}"
-
     try:
-        transcription = await client.audio.transcriptions.create(
-            model="whisper-1",
-            file=audio_file,
-            language=language,
-            response_format="verbose_json",
-            prompt="محادثة خدمة عملاء عربية — متجر إلكتروني سعودي",
-        )
+        with tempfile.NamedTemporaryFile(suffix=f".{audio_format}", delete=True) as tmp:
+            tmp.write(audio_data)
+            tmp.flush()
+            tmp.seek(0)
+            transcription = await client.audio.transcriptions.create(
+                model="whisper-1",
+                file=tmp,
+                language=language,
+                response_format="verbose_json",
+                prompt="محادثة خدمة عملاء عربية — متجر إلكتروني سعودي",
+            )
 
         text = transcription.text.strip()
         detected_language = getattr(transcription, "language", language)

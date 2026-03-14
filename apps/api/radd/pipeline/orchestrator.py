@@ -142,8 +142,24 @@ async def run_pipeline_async(
     dialect = dialect_result.dialect
 
     # ── 3. Classify intent ────────────────────────────────────────────────────
-    intent_result = classify_intent(normalized)
-    intent = intent_result.intent
+    if settings.use_intent_v2:
+        from radd.pipeline.intent_v2 import classify_intent_llm
+        from radd.deps import get_redis
+        redis_client = get_redis()
+        hist_str = [h.get("content", "") for h in (conversation_history or [])] if conversation_history else None
+        intent_dict = await classify_intent_llm(normalized, conversation_history=hist_str, redis_client=redis_client)
+        intent = intent_dict["intent_name"]
+        confidence_intent = intent_dict.get("confidence", 0.5)
+        entities = intent_dict.get("entities", {})
+        # خريطة النوايا للـ templates: shipping_inquiry → shipping
+        if intent == "shipping_inquiry":
+            intent = "shipping"
+        intent_result = IntentResult(intent=intent, confidence=confidence_intent)
+        order_number_from_entities = entities.get("order_number")
+    else:
+        intent_result = classify_intent(normalized)
+        intent = intent_result.intent
+        order_number_from_entities = None  # v1 doesn't extract entities
 
     # ── 4a. Action path (Salla order status) ─────────────────────────────────
     if intent == "order_status":
@@ -167,7 +183,7 @@ async def run_pipeline_async(
     if is_template_intent(intent) and intent_result.confidence >= settings.confidence_auto_threshold:
         params = {
             "customer_name": context.get("customer_name", ""),
-            "order_number": context.get("order_number", ""),
+            "order_number": (order_number_from_entities or context.get("order_number", "")) if order_number_from_entities else context.get("order_number", ""),
             "store_name": context.get("store_name", "متجرنا"),
         }
         template_result = render_template(intent, dialect, params)
@@ -192,7 +208,6 @@ async def run_pipeline_async(
     # ── 5. RAG path ───────────────────────────────────────────────────────────
     from radd.pipeline.retriever import retrieve
     from radd.pipeline.generator import generate_rag_response
-    from radd.pipeline.verifier import verify_response_fast
 
     passages, c_retrieval = await retrieve(
         query=normalized,
@@ -235,7 +250,12 @@ async def run_pipeline_async(
 
     # Verify grounding
     passage_texts = [p.content for p in passages]
-    c_verify, is_grounded = verify_response_fast(response_text, passage_texts)
+    if settings.use_verifier_v2:
+        from radd.pipeline.verifier_v2 import verify_response_async
+        c_verify, is_grounded, _details = await verify_response_async(response_text, passage_texts)
+    else:
+        from radd.pipeline.verifier import verify_response_fast
+        c_verify, is_grounded = verify_response_fast(response_text, passage_texts)
 
     # Full confidence = min of all three signals
     confidence = min(intent_result.confidence, c_retrieval, c_verify)

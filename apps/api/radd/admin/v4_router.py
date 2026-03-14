@@ -171,11 +171,13 @@ async def setup_instagram_channel(
         )
         channel = result.scalar_one_or_none()
 
+        from radd.utils.crypto import encrypt_sensitive_config
+
+        raw_config = {"ig_page_id": body.ig_page_id, "page_access_token": body.page_access_token}
+        encrypted_config = encrypt_sensitive_config(raw_config)
+
         if channel:
-            channel.config = {
-                "ig_page_id": body.ig_page_id,
-                "page_access_token": body.page_access_token,
-            }
+            channel.config = encrypted_config
             channel.is_active = True
         else:
             channel = Channel(
@@ -183,10 +185,7 @@ async def setup_instagram_channel(
                 type="instagram",
                 name="Instagram DM",
                 is_active=True,
-                config={
-                    "ig_page_id": body.ig_page_id,
-                    "page_access_token": body.page_access_token,
-                },
+                config=encrypted_config,
             )
             db.add(channel)
 

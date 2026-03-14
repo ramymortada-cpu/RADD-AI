@@ -23,6 +23,7 @@ from radd.conversations.schemas import (
     MessageResponse,
 )
 from radd.db.models import Channel, Conversation, Customer, Message, AuditLog
+from radd.conversations.csat import handle_csat_response, parse_csat_response
 from radd.db.session import get_db_session
 from radd.websocket.manager import ws_manager
 
@@ -202,7 +203,8 @@ async def agent_reply(
         try:
             from radd.config import settings
             from radd.whatsapp.client import send_text_message
-            channel_config = channel.config or {}
+            from radd.utils.crypto import get_channel_config_decrypted
+            channel_config = get_channel_config_decrypted(channel)
 
             # Decode phone: stored as hash — need raw phone for delivery.
             # In production: store encrypted phone. For pilot: pass phone via channel metadata.
@@ -212,7 +214,7 @@ async def agent_reply(
                     phone_number=phone,
                     message=body.content,
                     phone_number_id=channel_config.get("wa_phone_number_id") or settings.wa_phone_number_id,
-                    api_token=settings.wa_api_token,
+                    api_token=channel_config.get("wa_api_token") or settings.wa_api_token,
                 )
         except Exception as e:
             logger.error("agent_reply.wa_delivery_failed", error=str(e))
@@ -235,3 +237,31 @@ async def agent_reply(
         msg = result.scalar_one()
 
     return MessageResponse.model_validate(msg)
+
+
+@router.post("/{conversation_id}/csat", status_code=status.HTTP_204_NO_CONTENT)
+@limiter.limit(settings.default_rate_limit)
+async def record_csat(
+    request: Request,
+    conversation_id: uuid.UUID,
+    body: dict,
+    current: Annotated[CurrentUser, Depends(require_reviewer)],
+):
+    """Record CSAT rating (1-5) for a conversation."""
+    rating = body.get("rating")
+    if rating is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="rating required")
+    if isinstance(rating, str):
+        rating = parse_csat_response(rating)
+    if rating is None or not (1 <= rating <= 5):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="rating must be 1-5")
+    async with get_db_session(current.workspace_id) as db:
+        conv_result = await db.execute(
+            select(Conversation).where(
+                Conversation.id == conversation_id,
+                Conversation.workspace_id == current.workspace_id,
+            )
+        )
+        if not conv_result.scalar_one_or_none():
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+        await handle_csat_response(db, str(conversation_id), rating, str(current.workspace_id))

@@ -5,7 +5,8 @@ Anonymized benchmarks across workspaces by sector.
 "automation rate لمتاجر العطور المماثلة: 72%. أنت عند 58%."
 All data is fully anonymized — no workspace names or IDs shared.
 """
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
+import json
 import structlog
 
 logger = structlog.get_logger()
@@ -47,15 +48,29 @@ SECTOR_AR = {
 }
 
 
+BENCHMARK_CACHE_TTL = 3600  # 1 hour
+
+
 async def get_sector_benchmarks(
     db_session,
     sector: str | None = None,
 ) -> list[SectorBenchmark]:
     """
     Compute anonymized benchmarks grouped by sector.
-    Returns aggregate stats — no individual workspace data exposed.
+    Cached in Redis for 1 hour to avoid heavy aggregates on every request.
     """
     from sqlalchemy import text
+    from radd.deps import get_redis
+
+    cache_key = f"benchmark:sector:{sector or 'all'}"
+    r = get_redis()
+    try:
+        cached = await r.get(cache_key)
+        if cached:
+            data = json.loads(cached)
+            return [SectorBenchmark(**d) for d in data]
+    except Exception:
+        pass
 
     sector_filter = "AND w.sector = :sector" if sector else ""
     params: dict = {}
@@ -114,6 +129,11 @@ async def get_sector_benchmarks(
             top_intents=[],
         ))
 
+    try:
+        await r.set(cache_key, json.dumps([asdict(b) for b in benchmarks]), ex=BENCHMARK_CACHE_TTL)
+    except Exception:
+        pass
+
     return benchmarks
 
 
@@ -124,12 +144,22 @@ async def get_merchant_benchmark_report(
 ) -> MerchantBenchmarkReport | None:
     """
     Compare this workspace against peers in the same sector.
-    Returns actionable gap analysis with Arabic recommendations.
+    Cached in Redis for 1 hour.
     """
     from sqlalchemy import text
     from radd.utils.sql_helpers import safe_period_days
+    from radd.deps import get_redis
 
     period_days = safe_period_days(period_days, min_val=7, max_val=90)
+    cache_key = f"benchmark:workspace:{workspace_id}:{period_days}"
+    r = get_redis()
+    try:
+        cached = await r.get(cache_key)
+        if cached:
+            d = json.loads(cached)
+            return MerchantBenchmarkReport(**d)
+    except Exception:
+        pass
 
     # Get workspace sector
     try:
@@ -207,7 +237,7 @@ async def get_merchant_benchmark_report(
     # Arabic recommendations
     recommendations = _build_recommendations(my_auto, my_esc, bm, sector)
 
-    return MerchantBenchmarkReport(
+    report = MerchantBenchmarkReport(
         workspace_id=workspace_id,
         sector=sector,
         my_automation_rate=round(my_auto * 100, 1),
@@ -219,6 +249,13 @@ async def get_merchant_benchmark_report(
         gap_analysis=gap_analysis,
         recommendations=recommendations,
     )
+
+    try:
+        await r.set(cache_key, json.dumps(asdict(report)), ex=BENCHMARK_CACHE_TTL)
+    except Exception:
+        pass
+
+    return report
 
 
 def _build_recommendations(

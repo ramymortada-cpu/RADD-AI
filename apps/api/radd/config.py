@@ -1,4 +1,10 @@
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+# Weak keys that must never be used in production (token encryption, etc.)
+_WEAK_SECRET_KEYS = frozenset({"change-me", "radd-default-secret", ""})
+_MIN_SECRET_KEY_LEN = 32
 
 
 class Settings(BaseSettings):
@@ -79,6 +85,28 @@ class Settings(BaseSettings):
     # Shadow Mode — process messages fully but do NOT send WhatsApp responses.
     # Set to true for 48-hour pre-pilot dry run. Responses are logged only.
     shadow_mode: bool = False
+
+    # Pipeline v2 — Intent (LLM) and Verifier (NLI). Set True to enable.
+    use_intent_v2: bool = False
+    use_verifier_v2: bool = False
+
+    @model_validator(mode="after")
+    def validate_production_secret_key(self) -> "Settings":
+        """In production, SECRET_KEY must be strong (≥32 chars, not a known weak value)."""
+        if self.app_env != "production":
+            return self
+        sk = (self.secret_key or "").strip()
+        if sk in _WEAK_SECRET_KEYS:
+            raise ValueError(
+                "SECRET_KEY must be set to a strong value in production. "
+                "Generate one with: python -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\""
+            )
+        if len(sk) < _MIN_SECRET_KEY_LEN:
+            raise ValueError(
+                f"SECRET_KEY must be at least {_MIN_SECRET_KEY_LEN} characters in production. "
+                f"Current length: {len(sk)}"
+            )
+        return self
 
 
 settings = Settings()
