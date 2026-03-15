@@ -1,14 +1,14 @@
-from __future__ import annotations
-
 """
 Escalation service.
 Builds context packages, creates escalation events, manages agent queue.
 """
+from __future__ import annotations
+
 import uuid
 from datetime import UTC, datetime
 
 import structlog
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from radd.db.models import (
@@ -21,6 +21,17 @@ from radd.db.models import (
 from radd.pipeline.orchestrator import PipelineResult
 
 logger = structlog.get_logger()
+
+
+async def get_pending_escalations_count(db: AsyncSession, workspace_id: uuid.UUID) -> int:
+    """Count pending escalations for a workspace."""
+    result = await db.execute(
+        select(func.count(EscalationEvent.id)).where(
+            EscalationEvent.workspace_id == workspace_id,
+            EscalationEvent.status == "pending",
+        )
+    )
+    return result.scalar() or 0
 
 # Escalation reason classifier
 REASON_MAP = {

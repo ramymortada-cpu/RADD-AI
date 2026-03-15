@@ -249,3 +249,122 @@ class TestRBACHierarchy:
         assert payload["type"] == "refresh"
         assert "sub" in payload
         assert "workspace_id" in payload
+
+
+# ─── Zid Webhook Verification ────────────────────────────────────────────────
+
+class TestZidWebhookVerification:
+    """اختبارات التحقق من توقيع Zid webhook."""
+
+    SECRET = "test_zid_secret_key_for_testing"
+    PAYLOAD = b'{"event": "order.paid", "store_id": "123", "data": {"id": "456"}}'
+
+    def _make_signature(self, payload: bytes, secret: str) -> str:
+        sig = hmac.new(
+            key=secret.encode("utf-8"),
+            msg=payload,
+            digestmod=hashlib.sha256,
+        ).hexdigest()
+        return f"sha256={sig}"
+
+    def test_valid_signature_accepted(self):
+        """توقيع صحيح يجب أن يُقبل."""
+        sig = self._make_signature(self.PAYLOAD, self.SECRET)
+        from radd.webhooks.zid_verify import verify_zid_signature
+        assert verify_zid_signature(self.PAYLOAD, sig, self.SECRET) is True
+
+    def test_invalid_signature_rejected(self):
+        """توقيع خاطئ يجب أن يُرفض."""
+        from radd.webhooks.zid_verify import verify_zid_signature
+        assert verify_zid_signature(
+            self.PAYLOAD, "sha256=deadbeef1234", self.SECRET
+        ) is False
+
+    def test_missing_signature_rejected(self):
+        """غياب التوقيع يجب أن يُرفض."""
+        from radd.webhooks.zid_verify import verify_zid_signature
+        assert verify_zid_signature(self.PAYLOAD, None, self.SECRET) is False
+
+    def test_empty_secret_always_rejects(self):
+        """سر فاضي يجب أن يرفض دائماً حتى لو التوقيع صحيح."""
+        sig = self._make_signature(self.PAYLOAD, self.SECRET)
+        from radd.webhooks.zid_verify import verify_zid_signature
+        assert verify_zid_signature(self.PAYLOAD, sig, secret="") is False
+
+    def test_tampered_payload_rejected(self):
+        """payload معدّل بعد التوقيع يجب أن يُرفض."""
+        sig = self._make_signature(self.PAYLOAD, self.SECRET)
+        from radd.webhooks.zid_verify import verify_zid_signature
+        tampered = self.PAYLOAD + b"extra"
+        assert verify_zid_signature(tampered, sig, self.SECRET) is False
+
+    def test_signature_without_prefix_accepted(self):
+        """بعض إصدارات Zid ترسل hex بدون 'sha256=' — يجب قبوله."""
+        raw_sig = hmac.new(
+            key=self.SECRET.encode("utf-8"),
+            msg=self.PAYLOAD,
+            digestmod=hashlib.sha256,
+        ).hexdigest()
+        from radd.webhooks.zid_verify import verify_zid_signature
+        assert verify_zid_signature(self.PAYLOAD, raw_sig, self.SECRET) is True
+
+    def test_zid_webhook_endpoint_rejects_bad_signature(self):
+        """الـ endpoint يرجع 403 عند توقيع خاطئ."""
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from radd.channels.zid_router import router as zid_router
+        from radd.limiter import limiter
+
+        app = FastAPI()
+        app.state.limiter = limiter
+        app.include_router(zid_router, prefix="/api/v1")
+
+        with patch("radd.channels.zid_router.settings") as mock_settings:
+            mock_settings.zid_webhook_secret = self.SECRET
+            mock_settings.default_rate_limit = "200/minute"
+
+            client = TestClient(app)
+            response = client.post(
+                "/api/v1/webhooks/zid",
+                content=self.PAYLOAD,
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Zid-Signature": "sha256=invalidsignature",
+                },
+            )
+        assert response.status_code == 403
+
+    def test_zid_webhook_endpoint_accepts_valid_signature(self):
+        """الـ endpoint يرجع 200 عند توقيع صحيح."""
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from radd.channels.zid_router import router as zid_router
+        from radd.limiter import limiter
+
+        app = FastAPI()
+        app.state.limiter = limiter
+        app.include_router(zid_router, prefix="/api/v1")
+
+        sig = self._make_signature(self.PAYLOAD, self.SECRET)
+
+        with patch("radd.channels.zid_router.settings") as mock_settings:
+            mock_settings.zid_webhook_secret = self.SECRET
+            mock_settings.default_rate_limit = "200/minute"
+
+            with patch(
+                "radd.channels.zid_router._process_zid_webhook",
+                new_callable=AsyncMock,
+            ):
+                client = TestClient(app)
+                response = client.post(
+                    "/api/v1/webhooks/zid",
+                    content=self.PAYLOAD,
+                    headers={
+                        "Content-Type": "application/json",
+                        "X-Zid-Signature": sig,
+                    },
+                )
+        assert response.status_code == 200
+        assert response.json()["status"] == "ok"

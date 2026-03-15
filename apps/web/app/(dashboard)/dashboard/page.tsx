@@ -16,6 +16,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import TopBar from "@/components/layout/topbar";
 import KPICard from "@/components/dashboard/kpi-card";
+import OnboardingWizard from "./components/OnboardingWizard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { apiFetch } from "@/lib/api";
@@ -415,6 +416,9 @@ export default function DashboardPage() {
       />
 
       <div className="flex-1 overflow-y-auto p-6 space-y-6">
+        {/* ── Onboarding Wizard ───────────────── */}
+        <OnboardingWizard />
+
         {/* ── Demo Banner ─────────────────────── */}
         {isDemo && (
           <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">

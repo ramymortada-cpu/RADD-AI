@@ -4,10 +4,11 @@ from __future__ import annotations
 import json
 
 import structlog
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request, status
 
 from radd.config import settings
 from radd.limiter import limiter
+from radd.webhooks.zid_verify import verify_zid_signature
 
 logger = structlog.get_logger()
 router = APIRouter(prefix="/webhooks/zid", tags=["zid"])
@@ -15,9 +16,31 @@ router = APIRouter(prefix="/webhooks/zid", tags=["zid"])
 
 @router.post("", status_code=status.HTTP_200_OK)
 @limiter.limit(settings.default_rate_limit)
-async def receive_zid_webhook(request: Request, background_tasks: BackgroundTasks):
-    """Receive Zid order webhooks for revenue attribution."""
+async def receive_zid_webhook(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    x_zid_signature: str | None = Header(default=None, alias="X-Zid-Signature"),
+):
+    """Receive Zid order webhooks for revenue attribution with HMAC-SHA256 verification."""
     body_bytes = await request.body()
+
+    # 1. التحقق من التوقيع — رفض فوري إذا فشل
+    is_valid = verify_zid_signature(
+        payload=body_bytes,
+        signature_header=x_zid_signature,
+        secret=settings.zid_webhook_secret,
+    )
+
+    if not is_valid:
+        logger.warning(
+            "zid_webhook_rejected",
+            reason="invalid_signature",
+            ip=request.client.host if request.client else "unknown",
+        )
+        raise HTTPException(
+            status_code=403,
+            detail="Invalid Zid webhook signature",
+        )
 
     try:
         payload = json.loads(body_bytes)

@@ -22,10 +22,19 @@ from radd.db.models import User, Workspace
 from radd.db.session import get_db_session
 from radd.limiter import limiter
 
-router = APIRouter(prefix="/auth", tags=["auth"])
+router = APIRouter(prefix="/auth", tags=["Auth"])
 
 
-@router.post("/login", response_model=TokenResponse)
+@router.post(
+    "/login",
+    response_model=TokenResponse,
+    summary="تسجيل الدخول / Login",
+    description="Authenticate with workspace slug, email, and password. Returns access and refresh tokens. Callable by anyone. Side effects: none.",
+    responses={
+        200: {"description": "Tokens issued successfully"},
+        401: {"description": "Invalid credentials or workspace not found"},
+    },
+)
 @limiter.limit(settings.auth_rate_limit)
 async def login(request: Request, body: LoginRequest):
     async with get_db_session() as db:
@@ -49,7 +58,16 @@ async def login(request: Request, body: LoginRequest):
     )
 
 
-@router.post("/refresh", response_model=TokenResponse)
+@router.post(
+    "/refresh",
+    response_model=TokenResponse,
+    summary="تجديد الرمز / Refresh token",
+    description="Exchange a valid refresh token for new access and refresh tokens. Callable by anyone with a valid refresh token. Side effects: old refresh token is blacklisted.",
+    responses={
+        200: {"description": "New tokens issued successfully"},
+        401: {"description": "Invalid or revoked refresh token"},
+    },
+)
 @limiter.limit(settings.auth_rate_limit)
 async def refresh(request: Request, body: RefreshRequest):
     try:
@@ -87,7 +105,16 @@ async def refresh(request: Request, body: RefreshRequest):
     )
 
 
-@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+@router.post(
+    "/logout",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="تسجيل الخروج / Logout",
+    description="Blacklist the current access token and provided refresh token. Requires Bearer auth. Callable by authenticated users. Side effects: both tokens invalidated.",
+    responses={
+        204: {"description": "Tokens blacklisted successfully"},
+        401: {"description": "Missing or invalid authorization"},
+    },
+)
 @limiter.limit(settings.auth_rate_limit)
 async def logout(
     request: Request,
@@ -122,6 +149,15 @@ async def logout(
         pass
 
 
-@router.get("/me", response_model=UserResponse)
+@router.get(
+    "/me",
+    response_model=UserResponse,
+    summary="المستخدم الحالي / Current user",
+    description="Return the authenticated user's profile. Requires Bearer token. Callable by authenticated users. Side effects: none.",
+    responses={
+        200: {"description": "User profile returned"},
+        401: {"description": "Missing or invalid token"},
+    },
+)
 async def me(current: Annotated[CurrentUser, Depends(get_current_user)]):
     return UserResponse.model_validate(current.user)

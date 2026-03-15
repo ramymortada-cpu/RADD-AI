@@ -28,10 +28,20 @@ from radd.limiter import limiter
 from radd.websocket.manager import ws_manager
 
 logger = structlog.get_logger()
-router = APIRouter(prefix="/conversations", tags=["conversations"])
+router = APIRouter(prefix="/conversations", tags=["Conversations"])
 
 
-@router.get("", response_model=ConversationList)
+@router.get(
+    "",
+    response_model=ConversationList,
+    summary="قائمة المحادثات / List conversations",
+    description="Paginated list of workspace conversations with optional status filter. Callable by reviewers. Side effects: none.",
+    responses={
+        200: {"description": "Conversations returned"},
+        401: {"description": "Unauthorized"},
+        403: {"description": "Forbidden - reviewer role required"},
+    },
+)
 @limiter.limit(settings.default_rate_limit)
 async def list_conversations(
     request: Request,
@@ -73,7 +83,18 @@ async def list_conversations(
     return ConversationList(items=items, total=total, page=page, page_size=page_size)
 
 
-@router.get("/{conversation_id}", response_model=ConversationDetail)
+@router.get(
+    "/{conversation_id}",
+    response_model=ConversationDetail,
+    summary="تفاصيل محادثة / Get conversation",
+    description="Fetch a single conversation with messages and customer. Callable by reviewers. Side effects: none.",
+    responses={
+        200: {"description": "Conversation detail returned"},
+        401: {"description": "Unauthorized"},
+        403: {"description": "Forbidden"},
+        404: {"description": "Conversation not found"},
+    },
+)
 @limiter.limit(settings.default_rate_limit)
 async def get_conversation(
     request: Request,
@@ -108,7 +129,18 @@ async def get_conversation(
     return detail
 
 
-@router.patch("/{conversation_id}", response_model=ConversationSummary)
+@router.patch(
+    "/{conversation_id}",
+    response_model=ConversationSummary,
+    summary="تحديث محادثة / Update conversation",
+    description="Update conversation status or assignment. Callable by agents. Side effects: DB update, resolved_at set if status=resolved.",
+    responses={
+        200: {"description": "Conversation updated"},
+        401: {"description": "Unauthorized"},
+        403: {"description": "Forbidden - agent role required"},
+        404: {"description": "Conversation not found"},
+    },
+)
 @limiter.limit(settings.default_rate_limit)
 async def update_conversation(
     request: Request,
@@ -139,7 +171,19 @@ async def update_conversation(
     return ConversationSummary.model_validate(conv)
 
 
-@router.post("/{conversation_id}/messages", response_model=MessageResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/{conversation_id}/messages",
+    response_model=MessageResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="رد الوكيل / Agent reply",
+    description="Agent sends a message in a conversation. Delivers via WhatsApp and broadcasts to other agents. Callable by agents. Side effects: message stored, WhatsApp delivery, WebSocket broadcast.",
+    responses={
+        201: {"description": "Message sent successfully"},
+        401: {"description": "Unauthorized"},
+        403: {"description": "Forbidden"},
+        404: {"description": "Conversation not found"},
+    },
+)
 @limiter.limit(settings.default_rate_limit)
 async def agent_reply(
     request: Request,
@@ -239,7 +283,19 @@ async def agent_reply(
     return MessageResponse.model_validate(msg)
 
 
-@router.post("/{conversation_id}/csat", status_code=status.HTTP_204_NO_CONTENT)
+@router.post(
+    "/{conversation_id}/csat",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="تسجيل CSAT / Record CSAT",
+    description="Record CSAT rating (1-5) for a conversation. Callable by reviewers. Side effects: CSAT stored.",
+    responses={
+        204: {"description": "CSAT recorded"},
+        400: {"description": "Invalid rating (must be 1-5)"},
+        401: {"description": "Unauthorized"},
+        403: {"description": "Forbidden"},
+        404: {"description": "Conversation not found"},
+    },
+)
 @limiter.limit(settings.default_rate_limit)
 async def record_csat(
     request: Request,

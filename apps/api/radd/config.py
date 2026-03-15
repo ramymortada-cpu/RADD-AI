@@ -1,4 +1,4 @@
-from pydantic import model_validator
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Weak keys that must never be used in production (token encryption, etc.)
@@ -76,6 +76,18 @@ class Settings(BaseSettings):
     # Salla
     salla_client_id: str = ""
     salla_client_secret: str = ""
+
+    # Zid Webhook
+    zid_webhook_secret: str = Field(
+        default="",
+        description="Zid webhook secret for HMAC-SHA256 verification",
+    )
+
+    # Alerting
+    slack_alert_webhook_url: str = Field(
+        default="",
+        description="Slack Incoming Webhook URL for CRITICAL/FATAL alerts",
+    )
 
     # Confidence thresholds
     confidence_auto_threshold: float = 0.85

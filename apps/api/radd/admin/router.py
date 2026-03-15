@@ -17,7 +17,7 @@ from radd.admin.integrations_router import router as integrations_router
 from radd.admin.rules_router import router as rules_router
 from radd.admin.settings_router import router as settings_router
 
-router = APIRouter(prefix="/admin", tags=["admin"])
+router = APIRouter(prefix="/admin", tags=["Admin"])
 
 router.include_router(analytics_router, prefix="")
 router.include_router(control_router, prefix="")

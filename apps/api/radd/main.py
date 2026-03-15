@@ -12,6 +12,7 @@ from radd.admin.v4_router import router as admin_v4_router
 from radd.auth.router import router as auth_router
 from radd.channels.instagram_router import router as instagram_router
 from radd.channels.zid_router import router as zid_router
+from radd.alerts import init_alert_manager
 from radd.config import settings
 from radd.conversations.router import router as conversations_router
 from radd.deps import check_db_health, check_qdrant_health, check_redis_health
@@ -37,6 +38,11 @@ if settings.sentry_dsn:
         before_send=_filter_pii,
         send_default_pii=False,
     )
+
+init_alert_manager(
+    slack_webhook_url=settings.slack_alert_webhook_url,
+    app_env=settings.app_env,
+)
 
 
 @asynccontextmanager

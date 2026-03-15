@@ -16,7 +16,6 @@ import sys
 import os
 
 import pytest
-import pytest_asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 # ── ensure the api package is importable without installation ─────────────────
@@ -24,6 +23,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Fixtures
@@ -33,24 +34,58 @@ VERIFY_TOKEN = "radd_test_verify"
 PHONE_NUMBER_ID = "12345678"
 
 
-def _make_app() -> FastAPI:
+def _make_mock_redis():
+    """Redis mock for webhook tests — no real Redis connection."""
+    r = AsyncMock()
+    # set(key, val, nx=True, ex=...) — returns True when key is new (dedup)
+    r.set = AsyncMock(return_value=True)
+    r.xadd = AsyncMock(return_value=b"1-1")
+    r.get = AsyncMock(return_value=None)
+    r.exists = AsyncMock(return_value=0)
+    r.delete = AsyncMock(return_value=1)
+    return r
+
+
+def _make_app(limiter_instance=None) -> FastAPI:
     """Build a minimal FastAPI app with the webhook router, mocked deps."""
     from radd.config import settings
     settings.meta_app_secret = APP_SECRET
     settings.meta_verify_token = VERIFY_TOKEN
     settings.wa_phone_number_id = PHONE_NUMBER_ID
 
-    from radd.webhooks.router import router
     app = FastAPI()
+    if limiter_instance is not None:
+        app.state.limiter = limiter_instance
+
+    from radd.webhooks.router import router
     app.include_router(router)
     return app
 
 
 @pytest.fixture(scope="module")
 def client():
-    app = _make_app()
-    with TestClient(app, raise_server_exceptions=False) as c:
-        yield c
+    """Test client with Redis and DB mocked — no real connections."""
+    mock_redis = _make_mock_redis()
+    test_limiter = Limiter(key_func=get_remote_address, storage_uri="memory://")
+
+    with (
+        patch("radd.limiter.limiter", test_limiter),
+        patch("radd.webhooks.router.get_redis", return_value=mock_redis),
+        patch("radd.webhooks.router.get_db_session") as mock_db_session,
+    ):
+        # Mock get_db_session as async context manager — _resolve_workspace uses it
+        mock_db = AsyncMock()
+        mock_db.execute = AsyncMock(
+            return_value=MagicMock(
+                scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))
+            )
+        )
+        mock_db_session.return_value.__aenter__ = AsyncMock(return_value=mock_db)
+        mock_db_session.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        app = _make_app(limiter_instance=test_limiter)
+        with TestClient(app, raise_server_exceptions=False) as c:
+            yield c
 
 
 # ─────────────────────────────────────────────────────────────────────────────

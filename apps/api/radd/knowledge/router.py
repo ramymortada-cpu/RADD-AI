@@ -21,12 +21,22 @@ from radd.knowledge.schemas import (
 )
 from radd.limiter import limiter
 
-router = APIRouter(prefix="/kb", tags=["knowledge"])
+router = APIRouter(prefix="/kb", tags=["Knowledge"])
 
 
 # ─── Documents ────────────────────────────────────────────────────────────────
 
-@router.get("/documents", response_model=KBDocumentList)
+@router.get(
+    "/documents",
+    response_model=KBDocumentList,
+    summary="قائمة المستندات / List documents",
+    description="Paginated list of KB documents with optional status filter. Callable by reviewers. Side effects: none.",
+    responses={
+        200: {"description": "Documents returned"},
+        401: {"description": "Unauthorized"},
+        403: {"description": "Forbidden"},
+    },
+)
 @limiter.limit(settings.default_rate_limit)
 async def list_documents(
     request: Request,
@@ -47,7 +57,18 @@ async def list_documents(
     )
 
 
-@router.get("/documents/{doc_id}", response_model=KBDocumentDetail)
+@router.get(
+    "/documents/{doc_id}",
+    response_model=KBDocumentDetail,
+    summary="تفاصيل مستند / Get document",
+    description="Fetch a single KB document with chunk count. Callable by reviewers. Side effects: none.",
+    responses={
+        200: {"description": "Document detail returned"},
+        401: {"description": "Unauthorized"},
+        403: {"description": "Forbidden"},
+        404: {"description": "Document not found"},
+    },
+)
 @limiter.limit(settings.default_rate_limit)
 async def get_document(
     request: Request,
@@ -65,7 +86,18 @@ async def get_document(
     return resp
 
 
-@router.post("/documents", response_model=KBDocumentResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/documents",
+    response_model=KBDocumentResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="إنشاء مستند / Create document",
+    description="Create a new KB document. Callable by agents. Side effects: document stored, background indexing may run.",
+    responses={
+        201: {"description": "Document created"},
+        401: {"description": "Unauthorized"},
+        403: {"description": "Forbidden"},
+    },
+)
 @limiter.limit(settings.default_rate_limit)
 async def create_document(
     request: Request,
@@ -80,7 +112,18 @@ async def create_document(
     return KBDocumentResponse.model_validate(doc)
 
 
-@router.patch("/documents/{doc_id}", response_model=KBDocumentResponse)
+@router.patch(
+    "/documents/{doc_id}",
+    response_model=KBDocumentResponse,
+    summary="تحديث مستند / Update document",
+    description="Update an existing KB document. Callable by agents. Side effects: document updated.",
+    responses={
+        200: {"description": "Document updated"},
+        401: {"description": "Unauthorized"},
+        403: {"description": "Forbidden"},
+        404: {"description": "Document not found"},
+    },
+)
 @limiter.limit(settings.default_rate_limit)
 async def update_document(
     request: Request,
@@ -96,7 +139,18 @@ async def update_document(
     return KBDocumentResponse.model_validate(doc)
 
 
-@router.delete("/documents/{doc_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/documents/{doc_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="حذف مستند / Delete document",
+    description="Soft-delete a KB document. Callable by admins only. Side effects: document marked deleted.",
+    responses={
+        204: {"description": "Document deleted"},
+        401: {"description": "Unauthorized"},
+        403: {"description": "Forbidden - admin required"},
+        404: {"description": "Document not found"},
+    },
+)
 @limiter.limit(settings.default_rate_limit)
 async def delete_document(
     request: Request,
@@ -110,7 +164,19 @@ async def delete_document(
         await service.soft_delete_document(db, doc)
 
 
-@router.post("/documents/{doc_id}/approve", response_model=KBDocumentResponse)
+@router.post(
+    "/documents/{doc_id}/approve",
+    response_model=KBDocumentResponse,
+    summary="اعتماد مستند / Approve document",
+    description="Approve a KB document for RAG. Triggers background indexing (chunking, embedding, Qdrant). Callable by admins. Side effects: status updated, indexing queued.",
+    responses={
+        200: {"description": "Document approved"},
+        400: {"description": "Invalid status for approval"},
+        401: {"description": "Unauthorized"},
+        403: {"description": "Forbidden"},
+        404: {"description": "Document not found"},
+    },
+)
 @limiter.limit(settings.default_rate_limit)
 async def approve_document(
     request: Request,
@@ -142,7 +208,17 @@ async def approve_document(
 
 # ─── Templates ────────────────────────────────────────────────────────────────
 
-@router.get("/templates", response_model=list[TemplateResponse])
+@router.get(
+    "/templates",
+    response_model=list[TemplateResponse],
+    summary="قائمة القوالب / List templates",
+    description="List response templates, optionally filtered by intent. Callable by reviewers. Side effects: none.",
+    responses={
+        200: {"description": "Templates returned"},
+        401: {"description": "Unauthorized"},
+        403: {"description": "Forbidden"},
+    },
+)
 @limiter.limit(settings.default_rate_limit)
 async def list_templates(
     request: Request,
@@ -154,7 +230,18 @@ async def list_templates(
     return [TemplateResponse.model_validate(t) for t in templates]
 
 
-@router.post("/templates", response_model=TemplateResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/templates",
+    response_model=TemplateResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="إنشاء قالب / Create template",
+    description="Create a new response template. Callable by admins. Side effects: template stored.",
+    responses={
+        201: {"description": "Template created"},
+        401: {"description": "Unauthorized"},
+        403: {"description": "Forbidden"},
+    },
+)
 @limiter.limit(settings.default_rate_limit)
 async def create_template(
     request: Request,
@@ -166,7 +253,18 @@ async def create_template(
     return TemplateResponse.model_validate(template)
 
 
-@router.patch("/templates/{template_id}", response_model=TemplateResponse)
+@router.patch(
+    "/templates/{template_id}",
+    response_model=TemplateResponse,
+    summary="تحديث قالب / Update template",
+    description="Update an existing response template. Callable by admins. Side effects: template updated.",
+    responses={
+        200: {"description": "Template updated"},
+        401: {"description": "Unauthorized"},
+        403: {"description": "Forbidden"},
+        404: {"description": "Template not found"},
+    },
+)
 @limiter.limit(settings.default_rate_limit)
 async def update_template(
     request: Request,

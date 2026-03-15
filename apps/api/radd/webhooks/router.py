@@ -19,17 +19,24 @@ from radd.deps import get_redis
 from radd.limiter import limiter
 
 logger = structlog.get_logger()
-router = APIRouter(prefix="/webhooks", tags=["webhooks"])
+router = APIRouter(prefix="/webhooks", tags=["Webhooks"])
 
 DEDUP_TTL_SECONDS = 300  # 5 minutes
 
 
 # ── Verification ──────────────────────────────────────────────────────────────
 
-@router.get("/whatsapp")
+@router.get(
+    "/whatsapp",
+    summary="التحقق من الويب هوك / Verify webhook",
+    description="Meta webhook verification challenge. Called by Meta during app subscription. Validates hub.verify_token. Callable by Meta. Side effects: none.",
+    responses={
+        200: {"description": "Challenge returned for valid token"},
+        403: {"description": "Verification failed - invalid token or mode"},
+    },
+)
 @limiter.limit(settings.auth_rate_limit)
 async def verify_webhook(request: Request):
-    """Meta webhook verification challenge."""
     params = dict(request.query_params)
     mode = params.get("hub.mode")
     token = params.get("hub.verify_token")
@@ -44,17 +51,19 @@ async def verify_webhook(request: Request):
 
 # ── Inbound message handler ───────────────────────────────────────────────────
 
-@router.post("/whatsapp", status_code=status.HTTP_200_OK)
+@router.post(
+    "/whatsapp",
+    status_code=status.HTTP_200_OK,
+    summary="استقبال رسالة واتساب / Receive WhatsApp message",
+    description="Receive inbound WhatsApp message. Verifies HMAC-SHA256, parses, deduplicates, ACKs 200, enqueues to Redis for async processing. Called by Meta. Side effects: messages enqueued to Redis Stream.",
+    responses={
+        200: {"description": "Message accepted and queued"},
+        400: {"description": "Invalid JSON body"},
+        401: {"description": "Invalid HMAC signature"},
+    },
+)
 @limiter.limit(settings.default_rate_limit)
 async def receive_message(request: Request, background_tasks: BackgroundTasks):
-    """
-    Receive inbound WhatsApp message.
-    1. Verify HMAC-SHA256 signature.
-    2. Parse message.
-    3. Deduplicate via Redis.
-    4. ACK 200 immediately.
-    5. Enqueue to Redis Stream for async processing.
-    """
     body_bytes = await request.body()
 
     # ── HMAC verification ────────────────────────────────────────────────────

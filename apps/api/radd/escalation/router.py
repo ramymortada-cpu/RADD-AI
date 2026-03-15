@@ -18,10 +18,20 @@ from radd.escalation.schemas import (
 )
 from radd.limiter import limiter
 
-router = APIRouter(prefix="/escalations", tags=["escalations"])
+router = APIRouter(prefix="/escalations", tags=["Escalation"])
 
 
-@router.get("", response_model=EscalationQueue)
+@router.get(
+    "",
+    response_model=EscalationQueue,
+    summary="قائمة التصعيدات / List escalations",
+    description="Agent queue: pending escalations sorted by age (oldest first). Callable by agents. Side effects: none.",
+    responses={
+        200: {"description": "Escalations returned"},
+        401: {"description": "Unauthorized"},
+        403: {"description": "Forbidden"},
+    },
+)
 @limiter.limit(settings.default_rate_limit)
 async def list_escalations(
     request: Request,
@@ -54,7 +64,18 @@ async def list_escalations(
     )
 
 
-@router.get("/{escalation_id}", response_model=EscalationResponse)
+@router.get(
+    "/{escalation_id}",
+    response_model=EscalationResponse,
+    summary="تفاصيل تصعيد / Get escalation",
+    description="Fetch a single escalation event. Callable by agents. Side effects: none.",
+    responses={
+        200: {"description": "Escalation detail returned"},
+        401: {"description": "Unauthorized"},
+        403: {"description": "Forbidden"},
+        404: {"description": "Escalation not found"},
+    },
+)
 @limiter.limit(settings.default_rate_limit)
 async def get_escalation(
     request: Request,
@@ -74,7 +95,19 @@ async def get_escalation(
     return EscalationResponse.model_validate(event)
 
 
-@router.post("/{escalation_id}/accept", response_model=EscalationResponse)
+@router.post(
+    "/{escalation_id}/accept",
+    response_model=EscalationResponse,
+    summary="قبول تصعيد / Accept escalation",
+    description="Agent accepts an escalation. Updates status and broadcasts to WebSocket. Callable by agents. Side effects: status updated, WebSocket broadcast.",
+    responses={
+        200: {"description": "Escalation accepted"},
+        400: {"description": "Escalation already accepted/resolved"},
+        401: {"description": "Unauthorized"},
+        403: {"description": "Forbidden"},
+        404: {"description": "Escalation not found"},
+    },
+)
 @limiter.limit(settings.default_rate_limit)
 async def accept_escalation(
     request: Request,
@@ -111,7 +144,19 @@ async def accept_escalation(
     return EscalationResponse.model_validate(event)
 
 
-@router.post("/{escalation_id}/resolve", response_model=EscalationResponse)
+@router.post(
+    "/{escalation_id}/resolve",
+    response_model=EscalationResponse,
+    summary="حل تصعيد / Resolve escalation",
+    description="Agent resolves an escalation with optional notes. May send final message to customer. Callable by agents. Side effects: status updated, optionally WhatsApp message.",
+    responses={
+        200: {"description": "Escalation resolved"},
+        400: {"description": "Invalid status for resolve"},
+        401: {"description": "Unauthorized"},
+        403: {"description": "Forbidden"},
+        404: {"description": "Escalation not found"},
+    },
+)
 @limiter.limit(settings.default_rate_limit)
 async def resolve_escalation(
     request: Request,
