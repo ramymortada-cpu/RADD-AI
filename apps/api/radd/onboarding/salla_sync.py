@@ -432,16 +432,19 @@ async def handle_salla_order_webhook(
 
         # Match with customer who had a conversation in last 24 hours
         import hashlib
+        import uuid as uuid_mod
+
         phone_hash = hashlib.sha256(customer_phone.encode()).hexdigest()
 
         result = await db_session.execute(
             text("""
-                SELECT c.id, c.workspace_id
+                SELECT c.id as customer_id, conv.id as conversation_id
                 FROM customers c
                 JOIN conversations conv ON conv.customer_id = c.id
                 WHERE c.workspace_id = :wid
                 AND c.channel_identifier_hash = :phone_hash
                 AND conv.created_at > NOW() - INTERVAL '24 hours'
+                ORDER BY conv.created_at DESC
                 LIMIT 1
             """),
             {"wid": workspace_id, "phone_hash": phone_hash},
@@ -449,23 +452,42 @@ async def handle_salla_order_webhook(
 
         match = result.fetchone()
         if match:
-            # Revenue attribution!
-            await db_session.execute(
-                text("""
-                    UPDATE customers
-                    SET total_attributed_revenue = COALESCE(total_attributed_revenue, 0) + :amount,
-                        salla_total_orders = COALESCE(salla_total_orders, 0) + 1,
-                        salla_total_revenue = COALESCE(salla_total_revenue, 0) + :amount
-                    WHERE id = :cid
-                """),
-                {"amount": order_amount, "cid": str(match.id)},
-            )
-            await db_session.commit()
+            try:
+                # Insert into revenue_events (Revenue Attribution)
+                from radd.db.models import RevenueEvent
 
-            logger.info(
-                f"Revenue attributed: {order_amount} SAR to customer {match.id} "
-                f"(order {order_id}, workspace {workspace_id})"
-            )
+                rev_event = RevenueEvent(
+                    workspace_id=uuid_mod.UUID(workspace_id),
+                    customer_id=uuid_mod.UUID(str(match.customer_id)),
+                    conversation_id=uuid_mod.UUID(str(match.conversation_id)) if match.conversation_id else None,
+                    event_type="assisted_sale",
+                    amount_sar=order_amount,
+                    order_id=order_id,
+                    metadata_={"platform": "salla", "event": event},
+                )
+                db_session.add(rev_event)
+
+                # Update customers table
+                await db_session.execute(
+                    text("""
+                        UPDATE customers
+                        SET total_attributed_revenue = COALESCE(total_attributed_revenue, 0) + :amount,
+                            salla_total_orders = COALESCE(salla_total_orders, 0) + 1,
+                            salla_total_revenue = COALESCE(salla_total_revenue, 0) + :amount
+                        WHERE id = :cid
+                    """),
+                    {"amount": order_amount, "cid": str(match.customer_id)},
+                )
+                await db_session.commit()
+
+                logger.info(
+                    f"Revenue attributed: {order_amount} SAR to customer {match.customer_id} "
+                    f"(order {order_id}, workspace {workspace_id})"
+                )
+            except Exception as e:
+                logger.warning(f"Revenue attribution failed for order {order_id}: {e}")
+                await db_session.rollback()
+                # Never block order processing because of attribution failure
 
 
 def _extract_options(product_data: dict, option_name: str) -> list[str]:

@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     # Application
     app_env: str = "development"
     app_version: str = "0.1.0"
+    api_base_url: str = "http://localhost:8000"  # Override in production for Twilio callbacks
 
     # AWS Secrets Manager (production only)
     aws_secret_name: str = "radd/production/api_secrets"
@@ -89,6 +90,11 @@ class Settings(BaseSettings):
     # Salla
     salla_client_id: str = ""
     salla_client_secret: str = ""
+
+    # Twilio Voice (COD Shield - Egypt)
+    twilio_account_sid: str = ""
+    twilio_auth_token: str = ""
+    twilio_phone_number: str = ""  # الرقم اللي هيتصل منه (بصيغة +20XXXXXXXXX أو Twilio number)
 
     # Zid Webhook
     zid_webhook_secret: str = Field(

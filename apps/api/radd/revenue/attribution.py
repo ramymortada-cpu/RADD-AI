@@ -169,6 +169,47 @@ def format_revenue_for_briefing(summary: RevenueSummary) -> str:
     return "\n".join(lines)
 
 
+async def record_revenue_event(
+    workspace_id: str,
+    event_type: str,
+    order_id: str,
+    order_value: float,
+    source: str = "",
+    customer_id: str | None = None,
+    conversation_id: str | None = None,
+) -> None:
+    """
+    Record a revenue attribution event (e.g. cart_recovered).
+    Used by webhooks when customer completes purchase after cart recovery funnel.
+    """
+    import uuid
+
+    from radd.db.models import RevenueEvent
+    from radd.db.session import get_db_session
+
+    try:
+        ws_uuid = uuid.UUID(workspace_id)
+        cust_uuid = uuid.UUID(customer_id) if customer_id else None
+        conv_uuid = uuid.UUID(conversation_id) if conversation_id else None
+
+        async with get_db_session(ws_uuid) as db:
+            rev_event = RevenueEvent(
+                workspace_id=ws_uuid,
+                customer_id=cust_uuid,
+                conversation_id=conv_uuid,
+                event_type=event_type,
+                amount_sar=order_value,
+                order_id=order_id,
+                metadata_={"source": source} if source else {},
+            )
+            db.add(rev_event)
+            await db.flush()
+        logger.info("Revenue event: %s = %s SAR (order=%s)", event_type, order_value, order_id)
+    except Exception as e:
+        logger.warning("Revenue attribution failed: %s", e)
+        raise
+
+
 def _get_period_filter(period: str) -> str:
     filters = {
         "today": "CURRENT_DATE",

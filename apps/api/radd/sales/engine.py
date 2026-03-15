@@ -117,6 +117,33 @@ class SalesEngine:
 
         response = self._format_product_list(products_to_show, dialect)
 
+        # Recommendations engine (structure ready — activates when catalog available)
+        try:
+            from radd.sales.recommendations import Product, RecommendationEngine
+
+            rec_engine = RecommendationEngine()
+            # TODO: Load real catalog from Salla API or workspace products
+            # rec_engine.load_catalog(workspace_products)
+
+            # If we can identify the product being asked about:
+            # identified_product = Product(
+            #     id=str(p.get("id", "")),
+            #     name=p.get("name", "منتج"),
+            #     price=float(p.get("price", 0)),
+            #     category=p.get("category", ""),
+            #     tags=p.get("tags", []),
+            #     in_stock=p.get("in_stock", True),
+            # ) for p in products_to_show
+            # recommendations = rec_engine.get_recommendations(
+            #     current_product=identified_product,
+            #     context="inquiry",
+            #     dialect=dialect,
+            # )
+            # for r in recommendations:
+            #     response += f"\n\n{r.reason_ar}"
+        except Exception as e:
+            logger.debug("Recommendations not available: %s", e)
+
         return SalesResponse(
             response_text=response,
             products_to_show=products_to_show,
@@ -263,8 +290,31 @@ class SalesEngine:
                 "egyptian": "فهمتك! لو تحب أقولك — المنتج ده من أكتر المنتجات مبيعاً عندنا والعملاء شايفين إن الجودة تستاهل.",
                 "msa": "أفهمك! هذا المنتج من الأكثر مبيعاً لدينا والعملاء يثنون على جودته.",
             }
+        response_text = responses.get(dialect, responses["gulf"])
+
+        # Recommendations: price alternative (structure ready — activates when catalog available)
+        try:
+            from radd.sales.recommendations import Product, RecommendationEngine
+
+            rec_engine = RecommendationEngine()
+            # TODO: Load real catalog from Salla API or workspace products
+            # if product:
+            #     current = Product(
+            #         id=str(product.get("id", "")),
+            #         name=product.get("name", ""),
+            #         price=float(product.get("price", 0)),
+            #         category=product.get("category", ""),
+            #         tags=product.get("tags", []),
+            #         in_stock=product.get("in_stock", True),
+            #     )
+            #     alt_rec = rec_engine.get_price_alternative(current, dialect)
+            #     if alt_rec:
+            #         response_text += f"\n\n{alt_rec.reason_ar}"
+        except Exception as e:
+            logger.debug("Price alternative not available: %s", e)
+
         return SalesResponse(
-            response_text=responses.get(dialect, responses["gulf"]),
+            response_text=response_text,
             products_to_show=[alternatives[0]] if alternatives else [],
             stage=ConversationStage.OBJECTION,
             follow_up_after_minutes=120,

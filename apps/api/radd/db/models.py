@@ -420,3 +420,32 @@ class FollowUpQueue(Base):
     message_template: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(String(20), server_default="pending")  # pending, sent, cancelled
     created_at: Mapped[datetime] = now_utc()
+
+
+class OutboundCall(Base):
+    """COD Shield — outbound call records for order confirmation."""
+
+    __tablename__ = "outbound_calls"
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("workspaces.id"), nullable=False
+    )
+    order_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    customer_phone: Mapped[str] = mapped_column(String(20), nullable=False)
+    customer_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    store_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    call_type: Mapped[str] = mapped_column(String(50), nullable=False, server_default="order_confirmation")
+    status: Mapped[str] = mapped_column(String(30), nullable=False, server_default="pending")
+    call_sid: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    customer_response: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    max_attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default="3")
+    next_channel: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    metadata_: Mapped[dict] = mapped_column("metadata", JSONB, nullable=True)
+    created_at: Mapped[datetime] = now_utc()
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+    called_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    responded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

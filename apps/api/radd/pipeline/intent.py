@@ -38,8 +38,13 @@ INTENT_KEYWORDS = {
         "weight": 0.9,
     },
     "product_inquiry": {
-        "keywords": ["عندكم", "متوفر", "موجود", "كم سعر", "بكم", "السعر", "تفاصيل", "مواصفات",
-                     "الوان", "احجام", "مقاسات", "انواع", "كم سعره", "بكم هذا", "ابغى هذا"],
+        "keywords": [
+            "عندكم", "متوفر", "موجود", "كم سعر", "بكم", "السعر", "تفاصيل", "مواصفات",
+            "الوان", "احجام", "مقاسات", "انواع", "كم سعره", "بكم هذا", "ابغى هذا",
+            "وش عندكم", "فيه عندكم", "وش سعره",
+            "عندكم ايه", "بكام", "سعره كام", "فيه عندكو",
+            "ما هو السعر", "هل يتوفر", "أريد معرفة السعر", "ما المتوفر",
+        ],
         "weight": 1.0,
         "is_pre_purchase": True,
     },
@@ -55,10 +60,27 @@ INTENT_KEYWORDS = {
         "weight": 1.0,  # raised from 0.9 so single match ≥ 0.70
         "is_pre_purchase": True,
     },
+    "cancel_request": {
+        "keywords": [
+            "ألغي الطلب", "أبي ألغي", "ما أبيه", "لا أبيه",
+            "الغي الطلب", "مش عايز", "عايز الغي", "الغيلي",
+            "أريد إلغاء", "إلغاء الطلب",
+        ],
+        "weight": 1.0,
+    },
+    "price_objection": {
+        "keywords": [
+            "غالي", "غالية", "كثير عليه", "ما يسوى",
+            "غالي اوي", "غالي عليا", "مش قادر", "كتير",
+            "السعر مرتفع", "باهظ",
+        ],
+        "weight": 1.1,
+        "is_pre_purchase": True,
+    },
 }
 
 TEMPLATE_INTENTS = {"greeting", "order_status", "shipping", "return_policy", "store_hours"}
-PRE_PURCHASE_INTENTS = {"product_inquiry", "product_comparison", "purchase_hesitation"}
+PRE_PURCHASE_INTENTS = {"product_inquiry", "product_comparison", "purchase_hesitation", "price_objection"}
 
 # Strip Arabic/Latin punctuation before building the word set
 _PUNCT_RE = re.compile(r"[،؛؟!?.،,;:\-\"'()[\]{}]")

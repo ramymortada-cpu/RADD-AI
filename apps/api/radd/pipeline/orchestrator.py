@@ -18,6 +18,13 @@ import structlog
 
 from radd.config import settings
 from radd.pipeline.dialect import DialectResult, detect_dialect
+
+# Sales engine — activated for pre-sale conversations
+try:
+    from radd.sales.engine import SalesEngine
+    SALES_ENGINE_AVAILABLE = True
+except ImportError:
+    SALES_ENGINE_AVAILABLE = False
 from radd.pipeline.intent import IntentResult, classify_intent
 from radd.pipeline.normalizer import is_arabic, normalize
 from radd.pipeline.templates import (
@@ -216,7 +223,51 @@ async def _run_pipeline_async_impl(
                 confidence_breakdown={"intent": intent_result.confidence, "retrieval": 1.0, "verify": 1.0},
             )
 
-    # ── 4b. Template path ─────────────────────────────────────────────────────
+    # ── 4b. Pre-sale routing (SalesEngine) ────────────────────────────────────
+    PRE_SALE_INTENTS = {"product_inquiry", "price_objection"}
+    if SALES_ENGINE_AVAILABLE and intent in PRE_SALE_INTENTS:
+        try:
+            sales_engine = SalesEngine()
+            sales_response = None
+
+            if intent == "product_inquiry":
+                sales_response = await sales_engine.handle_inquiry(
+                    message=normalized,
+                    dialect=dialect,
+                    product_mentions=[],
+                    available_products=[],
+                    customer_tier="standard",
+                )
+            elif intent == "price_objection":
+                sales_response = await sales_engine.handle_objection(
+                    message=normalized,
+                    dialect=dialect,
+                    objection_type="price",
+                    current_product=None,
+                    alternatives=[],
+                )
+
+            if sales_response and sales_response.response_text:
+                logger.info("pipeline.sales_engine", intent=intent, dialect=dialect)
+                return PipelineResult(
+                    response_text=sales_response.response_text,
+                    intent=intent,
+                    dialect=dialect,
+                    confidence=intent_result.confidence,
+                    resolution_type="sales_engine",
+                    intent_result=intent_result,
+                    dialect_result=dialect_result,
+                    confidence_breakdown={
+                        "intent": intent_result.confidence,
+                        "retrieval": 1.0,
+                        "verify": 1.0,
+                    },
+                )
+        except Exception as e:
+            logger.warning("pipeline.sales_engine_error", intent=intent, error=str(e))
+            # Fall through to template/RAG path
+
+    # ── 4c. Template path ────────────────────────────────────────────────────
     if is_template_intent(intent) and intent_result.confidence >= settings.confidence_auto_threshold:
         params = {
             "customer_name": context.get("customer_name", ""),

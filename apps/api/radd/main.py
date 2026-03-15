@@ -7,6 +7,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
+from radd.admin.cod_shield_router import router as cod_shield_router
+from radd.admin.revenue_dashboard_router import router as revenue_dashboard_router
 from radd.admin.router import router as admin_router
 from radd.admin.v4_router import router as admin_v4_router
 from radd.auth.router import router as auth_router
@@ -25,6 +27,9 @@ from radd.limiter import limiter
 from radd.monitoring.sentry_and_logging import _filter_pii
 from radd.superadmin.router import router as superadmin_router
 from radd.webhooks.router import router as webhooks_router
+from radd.webhooks.shipping_router import router as shipping_router
+from radd.webhooks.cart_router import router as cart_router
+from radd.webhooks.twilio_router import router as twilio_router
 from radd.websocket.router import router as ws_router
 
 logger = structlog.get_logger()
@@ -85,10 +90,15 @@ app.add_middleware(
 # ─── Routers ──────────────────────────────────────────────────────────────────
 app.include_router(auth_router, prefix="/api/v1")
 app.include_router(webhooks_router, prefix="/api/v1")
+app.include_router(twilio_router, prefix="/api/v1")
+app.include_router(cart_router, prefix="/api/v1")
+app.include_router(shipping_router)
 app.include_router(kb_router, prefix="/api/v1")
 app.include_router(conversations_router, prefix="/api/v1")
 app.include_router(escalations_router, prefix="/api/v1")
 app.include_router(admin_router, prefix="/api/v1")
+app.include_router(cod_shield_router, prefix="/api/v1")
+app.include_router(revenue_dashboard_router, prefix="/api/v1")
 app.include_router(superadmin_router, prefix="/api/v1")
 app.include_router(intelligence_router, prefix="/api/v1")
 app.include_router(instagram_router, prefix="/api/v1")

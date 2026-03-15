@@ -11,7 +11,6 @@ import {
   LogOut,
   Zap,
   Users,
-  TrendingUp,
   Radar,
   Sliders,
   BarChart2,
@@ -20,6 +19,8 @@ import {
   Radio,
   UserMinus,
   Gauge,
+  ShieldCheck,
+  DollarSign,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { logout } from "@/lib/api";
@@ -29,8 +30,9 @@ const NAV_ITEMS = [
   { href: "/conversations", label: "المحادثات", icon: MessageSquare },
   { href: "/customers", label: "ذاكرة العملاء", icon: Users },
   { href: "/control-center", label: "مركز التحكم", icon: Gauge },
+  { href: "/cod-shield", label: "درع الـ COD", icon: ShieldCheck },
   { href: "/analytics", label: "تحليلات الأداء", icon: BarChart2 },
-  { href: "/revenue", label: "العائد المالي", icon: TrendingUp },
+  { href: "/revenue", label: "الإيرادات", icon: DollarSign },
   { href: "/radar", label: "الرادار التشغيلي", icon: Radar },
   { href: "/churn", label: "رادار التسرب", icon: UserMinus },
   { href: "/rules", label: "قواعد ذكية", icon: Sliders },

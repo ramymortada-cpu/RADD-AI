@@ -1,4 +1,7 @@
 """Admin integrations: Salla sync, starter pack, agent assist, Salla actions."""
+# TODO: Add Salla order webhook endpoint to receive order.created events.
+# When implemented, call: radd.onboarding.salla_sync.handle_salla_order_webhook()
+# for revenue attribution (RevenueEventType.ASSISTED_SALE). See: radd/revenue/attribution.py
 from __future__ import annotations
 
 import uuid
