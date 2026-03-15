@@ -342,6 +342,21 @@ async def _run_orchestrator(
     ws_result = await db.execute(select(Workspace).where(Workspace.id == workspace_id))
     ws = ws_result.scalar_one_or_none()
     ws_settings = (ws.settings or {}) if ws else {}
+    if ws_settings.get("automation_paused"):
+        from radd.pipeline.orchestrator import PipelineResult
+        from radd.pipeline.templates import get_escalation_message
+        dial_str = dialect.dialect if hasattr(dialect, "dialect") else "gulf"
+        logger.info("worker.automation_paused", workspace_id=str(workspace_id), reason="automation_paused")
+        return PipelineResult(
+            response_text=get_escalation_message(dial_str),
+            intent=intent_result.intent,
+            dialect=dial_str,
+            confidence=0.0,
+            resolution_type="escalated_hard",
+            intent_result=intent_result,
+            confidence_breakdown={"intent": intent_result.confidence, "retrieval": 0.0, "verify": 0.0},
+            escalation_reason_override="automation_paused",
+        )
     use_intent_v2 = ws_settings.get("use_intent_v2") if "use_intent_v2" in ws_settings else settings.use_intent_v2
     use_verifier_v2 = ws_settings.get("use_verifier_v2") if "use_verifier_v2" in ws_settings else settings.use_verifier_v2
     from radd.deps import get_qdrant
@@ -433,6 +448,7 @@ async def _store_outbound_and_update(
     ESCALATION_QUEUE_LIMIT = 50
     if pipeline_result.resolution_type in ("escalated_hard", "escalated_soft"):
         from radd.escalation.service import create_escalation, get_pending_escalations_count
+        reason_override = getattr(pipeline_result, "escalation_reason_override", None)
         escalation_event = await create_escalation(
             db=db,
             workspace_id=workspace_id,
@@ -440,6 +456,7 @@ async def _store_outbound_and_update(
             customer=customer,
             pipeline_result=pipeline_result,
             trigger_message_id=inbound_msg.id,
+            reason_override=reason_override,
         )
         try:
             pending_count = await get_pending_escalations_count(db, workspace_id)

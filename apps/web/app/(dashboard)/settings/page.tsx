@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   Save, UserPlus, Eye, EyeOff, RefreshCw, Layers,
   Instagram, Code, Mic, MicOff, Smartphone, Copy, Check,
@@ -11,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import Link from "next/link";
 import {
   getSettings,
   updateSettings,
@@ -95,6 +97,19 @@ export default function SettingsPage() {
     password: "",
   });
   const [creatingUser, setCreatingUser] = useState(false);
+
+  const searchParams = useSearchParams();
+  const tabFromUrl = searchParams.get("tab") || "general";
+
+  // Scroll to section when ?tab= is in URL
+  useEffect(() => {
+    if (loading) return;
+    if (tabFromUrl === "channels") {
+      document.getElementById("settings-channels")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    } else if (tabFromUrl === "users") {
+      document.getElementById("settings-users")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }, [tabFromUrl, loading]);
 
   useEffect(() => {
     Promise.all([getSettings(), getUsers(), getShadowMode()])
@@ -293,9 +308,32 @@ export default function SettingsPage() {
     );
   }
 
+  const TABS = [
+    { id: "general", label: "عام", href: "/settings" },
+    { id: "channels", label: "القنوات", href: "/settings?tab=channels" },
+    { id: "users", label: "المستخدمون", href: "/settings?tab=users" },
+  ] as const;
+
   return (
     <div className="flex flex-col h-full overflow-hidden">
       <TopBar title="الإعدادات" subtitle={wsSettings?.name} />
+
+      {/* Tab bar */}
+      <div className="flex gap-1 px-6 py-2 border-b border-border bg-muted/30 shrink-0">
+        {TABS.map((t) => (
+          <Link
+            key={t.id}
+            href={t.href}
+            className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+              tabFromUrl === t.id
+                ? "bg-background text-foreground shadow-sm border border-border"
+                : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+            }`}
+          >
+            {t.label}
+          </Link>
+        ))}
+      </div>
 
       <div className="flex-1 overflow-y-auto p-6 space-y-6">
         {error && (
@@ -752,8 +790,8 @@ export default function SettingsPage() {
           </CardContent>
         </Card>
 
-        {/* Webhook URLs */}
-        <Card>
+        {/* Webhook URLs — tab=channels */}
+        <Card id="settings-channels">
           <CardHeader>
             <CardTitle className="text-base flex items-center gap-2">
               <Webhook className="h-4 w-4 text-blue-500" />
@@ -908,8 +946,8 @@ export default function SettingsPage() {
           </CardContent>
         </Card>
 
-        {/* Users */}
-        <Card>
+        {/* Users — tab=users */}
+        <Card id="settings-users">
           <CardHeader>
             <div className="flex items-center justify-between">
               <CardTitle className="text-base">إدارة المستخدمين</CardTitle>

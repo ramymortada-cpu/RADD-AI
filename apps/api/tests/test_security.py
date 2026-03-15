@@ -312,59 +312,67 @@ class TestZidWebhookVerification:
         """الـ endpoint يرجع 403 عند توقيع خاطئ."""
         from fastapi import FastAPI
         from fastapi.testclient import TestClient
+        from slowapi import Limiter
+        from slowapi.util import get_remote_address
 
-        from radd.channels.zid_router import router as zid_router
-        from radd.limiter import limiter
+        test_limiter = Limiter(key_func=get_remote_address, storage_uri="memory://")
+        # Patch limiter BEFORE importing zid_router so it gets memory storage
+        with patch("radd.limiter.limiter", test_limiter):
+            from radd.channels.zid_router import router as zid_router
 
-        app = FastAPI()
-        app.state.limiter = limiter
-        app.include_router(zid_router, prefix="/api/v1")
+            app = FastAPI()
+            app.state.limiter = test_limiter
+            app.include_router(zid_router, prefix="/api/v1")
 
-        with patch("radd.channels.zid_router.settings") as mock_settings:
-            mock_settings.zid_webhook_secret = self.SECRET
-            mock_settings.default_rate_limit = "200/minute"
+            with patch("radd.channels.zid_router.settings") as mock_settings:
+                mock_settings.zid_webhook_secret = self.SECRET
+                mock_settings.default_rate_limit = "200/minute"
 
-            client = TestClient(app)
-            response = client.post(
-                "/api/v1/webhooks/zid",
-                content=self.PAYLOAD,
-                headers={
-                    "Content-Type": "application/json",
-                    "X-Zid-Signature": "sha256=invalidsignature",
-                },
-            )
-        assert response.status_code == 403
-
-    def test_zid_webhook_endpoint_accepts_valid_signature(self):
-        """الـ endpoint يرجع 200 عند توقيع صحيح."""
-        from fastapi import FastAPI
-        from fastapi.testclient import TestClient
-
-        from radd.channels.zid_router import router as zid_router
-        from radd.limiter import limiter
-
-        app = FastAPI()
-        app.state.limiter = limiter
-        app.include_router(zid_router, prefix="/api/v1")
-
-        sig = self._make_signature(self.PAYLOAD, self.SECRET)
-
-        with patch("radd.channels.zid_router.settings") as mock_settings:
-            mock_settings.zid_webhook_secret = self.SECRET
-            mock_settings.default_rate_limit = "200/minute"
-
-            with patch(
-                "radd.channels.zid_router._process_zid_webhook",
-                new_callable=AsyncMock,
-            ):
                 client = TestClient(app)
                 response = client.post(
                     "/api/v1/webhooks/zid",
                     content=self.PAYLOAD,
                     headers={
                         "Content-Type": "application/json",
-                        "X-Zid-Signature": sig,
+                        "X-Zid-Signature": "sha256=invalidsignature",
                     },
                 )
+        assert response.status_code == 403
+
+    def test_zid_webhook_endpoint_accepts_valid_signature(self):
+        """الـ endpoint يرجع 200 عند توقيع صحيح."""
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+        from slowapi import Limiter
+        from slowapi.util import get_remote_address
+
+        test_limiter = Limiter(key_func=get_remote_address, storage_uri="memory://")
+        sig = self._make_signature(self.PAYLOAD, self.SECRET)
+
+        # Patch limiter BEFORE importing zid_router so it gets memory storage
+        with patch("radd.limiter.limiter", test_limiter):
+            from radd.channels.zid_router import router as zid_router
+
+            app = FastAPI()
+            app.state.limiter = test_limiter
+            app.include_router(zid_router, prefix="/api/v1")
+
+            with patch("radd.channels.zid_router.settings") as mock_settings:
+                mock_settings.zid_webhook_secret = self.SECRET
+                mock_settings.default_rate_limit = "200/minute"
+
+                with patch(
+                    "radd.channels.zid_router._process_zid_webhook",
+                    new_callable=AsyncMock,
+                ):
+                    client = TestClient(app)
+                    response = client.post(
+                        "/api/v1/webhooks/zid",
+                        content=self.PAYLOAD,
+                        headers={
+                            "Content-Type": "application/json",
+                            "X-Zid-Signature": sig,
+                        },
+                    )
         assert response.status_code == 200
         assert response.json()["status"] == "ok"

@@ -43,6 +43,7 @@ class PipelineResult:
     source_passages: list[dict] = field(default_factory=list)
     confidence_breakdown: dict = field(default_factory=dict)
     rag_draft: str | None = None    # For soft escalation: draft to show agent
+    escalation_reason_override: str | None = None  # e.g. "automation_paused"
 
 
 def run_pipeline(

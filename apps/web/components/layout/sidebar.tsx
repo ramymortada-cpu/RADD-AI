@@ -19,6 +19,7 @@ import {
   Code,
   Radio,
   UserMinus,
+  Gauge,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { logout } from "@/lib/api";
@@ -27,6 +28,7 @@ const NAV_ITEMS = [
   { href: "/dashboard", label: "الرئيسية", icon: LayoutDashboard },
   { href: "/conversations", label: "المحادثات", icon: MessageSquare },
   { href: "/customers", label: "ذاكرة العملاء", icon: Users },
+  { href: "/control-center", label: "مركز التحكم", icon: Gauge },
   { href: "/analytics", label: "تحليلات الأداء", icon: BarChart2 },
   { href: "/revenue", label: "العائد المالي", icon: TrendingUp },
   { href: "/radar", label: "الرادار التشغيلي", icon: Radar },

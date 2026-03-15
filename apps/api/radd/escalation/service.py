@@ -121,6 +121,7 @@ async def create_escalation(
     customer: Customer,
     pipeline_result: PipelineResult,
     trigger_message_id: uuid.UUID | None = None,
+    reason_override: str | None = None,
 ) -> EscalationEvent:
     """Create an escalation event and update conversation status."""
     context_package = await build_context_package(db, conversation, customer, pipeline_result)
@@ -130,11 +131,13 @@ async def create_escalation(
     )
 
     # Determine reason
-    reason = "low_confidence"
-    if pipeline_result.intent == "other":
-        reason = "unknown_intent"
-    elif escalation_type == "soft":
-        reason = "soft_confidence"
+    reason = reason_override
+    if reason is None:
+        reason = "low_confidence"
+        if pipeline_result.intent == "other":
+            reason = "unknown_intent"
+        elif escalation_type == "soft":
+            reason = "soft_confidence"
 
     event = EscalationEvent(
         workspace_id=workspace_id,

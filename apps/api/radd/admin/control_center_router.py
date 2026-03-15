@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+import uuid
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
+from sqlalchemy import func, select
 
 from radd.auth.middleware import CurrentUser, require_reviewer
 from radd.config import settings
+from radd.db.models import Conversation, Customer, EscalationEvent, Message, Workspace
+from radd.db.session import get_db_session
 from radd.limiter import limiter
 
 logger = logging.getLogger("radd.admin.control_center")
@@ -27,9 +31,94 @@ class AutomationStatus(BaseModel):
 
 @control_router.get("/decisions")
 @limiter.limit(settings.default_rate_limit)
-async def get_ai_decisions(request: Request, current: Annotated[CurrentUser, Depends(require_reviewer)], limit: int = 50):
-    """سجل قرارات الـ AI — integrate with audit_log."""
-    return {"message": "AI decisions log - integrate with audit_log", "limit": limit}
+async def get_ai_decisions(
+    request: Request,
+    current: Annotated[CurrentUser, Depends(require_reviewer)],
+    limit: int = Query(50, ge=1, le=100),
+):
+    """سجل قرارات الـ AI — last 50 system messages with resolution data."""
+    async with get_db_session(current.workspace_id) as db:
+        result = await db.execute(
+            select(Message, Conversation, Customer)
+            .join(Conversation, Message.conversation_id == Conversation.id)
+            .join(Customer, Conversation.customer_id == Customer.id)
+            .where(
+                Message.workspace_id == current.workspace_id,
+                Message.sender_type == "system",
+                Conversation.resolution_type.isnot(None),
+            )
+            .order_by(Message.created_at.desc())
+            .limit(limit)
+        )
+        rows = result.all()
+
+    decisions = []
+    for msg, conv, cust in rows:
+        was_escalated = conv.resolution_type in ("escalated_hard", "escalated_soft")
+        decisions.append({
+            "message_id": str(msg.id),
+            "conversation_id": str(conv.id),
+            "customer_phone_hash": cust.channel_identifier_hash or "",
+            "intent": conv.intent or "other",
+            "confidence_score": float(conv.confidence_score) if conv.confidence_score else 0,
+            "resolution_path": conv.resolution_type or "",
+            "response_preview": (msg.content or "")[:100],
+            "created_at": msg.created_at.isoformat() if msg.created_at else None,
+            "was_escalated": was_escalated,
+        })
+    return {"decisions": decisions}
+
+
+@control_router.get("/stats")
+@limiter.limit(settings.default_rate_limit)
+async def get_control_center_stats(
+    request: Request,
+    current: Annotated[CurrentUser, Depends(require_reviewer)],
+):
+    """Today's counts: total_auto, total_escalated, total_soft, automation_rate."""
+    now = datetime.now(UTC)
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    async with get_db_session(current.workspace_id) as db:
+        # total_auto: conversations resolved automatically today
+        auto_result = await db.execute(
+            select(func.count()).where(
+                Conversation.workspace_id == current.workspace_id,
+                Conversation.last_message_at >= today_start,
+                Conversation.resolution_type.in_(["auto_template", "auto_rag"]),
+            )
+        )
+        total_auto = auto_result.scalar_one() or 0
+
+        # total_escalated: escalated (hard + soft) today
+        esc_result = await db.execute(
+            select(func.count()).where(
+                Conversation.workspace_id == current.workspace_id,
+                Conversation.last_message_at >= today_start,
+                Conversation.resolution_type.in_(["escalated_hard", "escalated_soft"]),
+            )
+        )
+        total_escalated = esc_result.scalar_one() or 0
+
+        # total_soft: soft escalations today
+        soft_result = await db.execute(
+            select(func.count()).where(
+                Conversation.workspace_id == current.workspace_id,
+                Conversation.last_message_at >= today_start,
+                Conversation.resolution_type == "escalated_soft",
+            )
+        )
+        total_soft = soft_result.scalar_one() or 0
+
+    total_resolved = total_auto + total_escalated
+    automation_rate = round(total_auto / total_resolved * 100, 1) if total_resolved else 100.0
+
+    return {
+        "total_auto": total_auto,
+        "total_escalated": total_escalated,
+        "total_soft": total_soft,
+        "automation_rate": automation_rate,
+    }
 
 
 @control_router.post("/pause-automation")
@@ -37,21 +126,37 @@ async def get_ai_decisions(request: Request, current: Annotated[CurrentUser, Dep
 async def pause_automation(
     request: Request,
     current: Annotated[CurrentUser, Depends(require_reviewer)],
-    reason: str = "manual",
-    duration_minutes: int = 0,
 ):
     """إيقاف الأتمتة مؤقتاً."""
-    return {
-        "status": "paused",
-        "reason": reason,
-        "auto_resume": f"{duration_minutes}m" if duration_minutes else "manual",
-    }
+    async with get_db_session(current.workspace_id) as db:
+        result = await db.execute(
+            select(Workspace).where(Workspace.id == current.workspace_id)
+        )
+        ws = result.scalar_one_or_none()
+        if not ws:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404, detail="Workspace not found")
+        ws_settings = dict(ws.settings or {})
+        ws_settings["automation_paused"] = True
+        ws.settings = ws_settings
+    return {"status": "paused"}
 
 
 @control_router.post("/resume-automation")
 @limiter.limit(settings.default_rate_limit)
 async def resume_automation(request: Request, current: Annotated[CurrentUser, Depends(require_reviewer)]):
     """استئناف الأتمتة."""
+    async with get_db_session(current.workspace_id) as db:
+        result = await db.execute(
+            select(Workspace).where(Workspace.id == current.workspace_id)
+        )
+        ws = result.scalar_one_or_none()
+        if not ws:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404, detail="Workspace not found")
+        ws_settings = dict(ws.settings or {})
+        ws_settings["automation_paused"] = False
+        ws.settings = ws_settings
     return {"status": "active"}
 
 
@@ -60,10 +165,40 @@ async def resume_automation(request: Request, current: Annotated[CurrentUser, De
 async def get_pending_reviews(
     request: Request,
     current: Annotated[CurrentUser, Depends(require_reviewer)],
-    limit: int = 20,
+    limit: int = Query(20, ge=1, le=100),
 ):
-    """الردود المعلقة للمراجعة — integrate with escalated_soft."""
-    return {"message": "Pending reviews - integrate", "limit": limit}
+    """الردود المعلقة للمراجعة — escalation_events where status=pending."""
+    async with get_db_session(current.workspace_id) as db:
+        result = await db.execute(
+            select(EscalationEvent)
+            .where(
+                EscalationEvent.workspace_id == current.workspace_id,
+                EscalationEvent.status == "pending",
+            )
+            .order_by(EscalationEvent.created_at.asc())
+            .limit(limit)
+        )
+        events = result.scalars().all()
+
+    now = datetime.now(UTC)
+    items = []
+    for ev in events:
+        ctx = ev.context_package or {}
+        summary = ctx.get("summary", "")
+        minutes_waiting = 0
+        if ev.created_at:
+            delta = now - ev.created_at.replace(tzinfo=UTC) if ev.created_at.tzinfo is None else ev.created_at
+            minutes_waiting = int(delta.total_seconds() / 60)
+        items.append({
+            "escalation_id": str(ev.id),
+            "conversation_id": str(ev.conversation_id),
+            "reason": ev.reason or "unknown",
+            "confidence_at_escalation": float(ev.confidence_at_escalation) if ev.confidence_at_escalation else None,
+            "context_package_summary": summary,
+            "created_at": ev.created_at.isoformat() if ev.created_at else None,
+            "minutes_waiting": minutes_waiting,
+        })
+    return {"pending_reviews": items}
 
 
 @control_router.post("/approve-review/{message_id}")
